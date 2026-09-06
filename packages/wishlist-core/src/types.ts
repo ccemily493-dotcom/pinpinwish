@@ -1,0 +1,160 @@
+import type {
+  Priority,
+  WishlistItemStatus,
+  Category,
+  SourceType,
+  Currency,
+  ProductImage,
+} from '@pinpinwish/shared'
+import type { ProductOffer, ProductOfferRecord } from '@pinpinwish/price-tracker'
+
+// ─── Source Adapter Contract ─────────────────────────────────────────────────
+
+/**
+ * Result of a source sync operation.
+ */
+export interface SourceSyncResult<TItem = unknown> {
+  sourceType: string
+  sourceId?: string
+  newItems: TItem[]
+  removedItemIds: string[]
+  modifiedItems: TItem[]
+  nextCursor?: string
+  syncedAt: Date
+}
+
+/**
+ * WishlistSourceAdapter — the core abstraction that keeps the wishlist
+ * decoupled from any specific source (Pinterest, Instagram, etc.).
+ *
+ * Design decision: This adapter pattern ensures the wishlist never
+ * depends directly on Pinterest or any other source. New sources
+ * can be added by implementing this interface without touching wishlist-core.
+ */
+export interface WishlistSourceAdapter {
+  readonly sourceType: string
+  sync(cursor?: string): Promise<SourceSyncResult>
+}
+
+// ─── Persistent Records (Database / Storage Entities) ────────────────────────
+
+export interface ProductRecord {
+  id: string
+  slug: string
+  name: string
+  brand?: string
+  category: Category
+  imageUrl?: string
+  description?: string
+  createdAt?: Date
+  updatedAt?: Date
+}
+
+export interface WishlistRecord {
+  id: string
+  userId: string
+  name: string
+  currency: Currency
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface WishlistItemRecord {
+  id: string
+  wishlistId: string
+  /** Foreign key to resolved product (optional if unresolved) */
+  productId?: string
+  /** Optional Pinterest pin reference */
+  pinterestPinId?: string
+  /** Foreign key to generic wishlist_sources entry */
+  sourceId?: string
+  /** The type of source this item came from */
+  sourceType?: SourceType
+  /** The source's own identifier for this item */
+  sourceItemId?: string
+  priority: Priority
+  status: WishlistItemStatus
+  desiredSize?: string
+  desiredColor?: string
+  notes?: string
+  /** Conservative duplicate detection flag */
+  possibleDuplicateOf?: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+// ─── Hydrated Entities / View Models (UI & Domain Logic) ─────────────────────
+
+export interface Product {
+  id: string
+  slug: string
+  name: string
+  brand?: string
+  category: Category
+  imageUrl?: string
+  images?: ProductImage[]
+  description?: string
+  offers: ProductOffer[]
+}
+
+/**
+ * Hydrated Wishlist Item view model combining item preferences and resolved product.
+ */
+export interface WishlistItemView {
+  id: string
+  wishlistId: string
+  product: Product
+  productId?: string
+  pinterestPinId?: string
+  sourceId?: string
+  sourceType?: SourceType
+  sourceItemId?: string
+  priority: Priority
+  status: WishlistItemStatus
+  desiredSize?: string
+  desiredColor?: string
+  notes?: string
+  possibleDuplicateOf?: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+/**
+ * Type alias for backward compatibility across UI components.
+ */
+export type WishlistItem = WishlistItemView
+export type WishlistItemWithProduct = WishlistItemView
+
+export interface WishlistView {
+  id: string
+  userId: string
+  name: string
+  items: WishlistItemView[]
+  currency: Currency
+  createdAt: Date
+  updatedAt: Date
+}
+
+export type Wishlist = WishlistView
+
+// ─── Filter & Sort Types ─────────────────────────────────────────────────────
+
+export interface WishlistFilters {
+  search?: string
+  category?: Category
+  priority?: Priority
+  status?: WishlistItemStatus
+  minPrice?: number
+  maxPrice?: number
+  currency?: Currency
+  onlyUnresolved?: boolean
+  onlyPossibleDuplicates?: boolean
+}
+
+export type SortField = 'price' | 'date' | 'priority'
+export type SortDirection = 'asc' | 'desc'
+
+export interface WishlistSort {
+  field: SortField
+  direction: SortDirection
+}

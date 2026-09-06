@@ -1,0 +1,17 @@
+{
+  "name": "@pinpinwish/product-search",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"No tests in product-search (contracts only)\""
+  },
+  "dependencies": {
+    "@pinpinwish/shared": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
