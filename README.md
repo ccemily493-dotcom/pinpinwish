@@ -67,7 +67,7 @@ OAuth tokens are NEVER stored in plain text. Each token (access token and refres
 
 ## Installation
 
-**Prerequisites:** Node.js ≥18, npm ≥9
+**Prerequisites:** Node.js ≥20.9, npm ≥9
 
 ```bash
 git clone https://github.com/ccemily493-dotcom/pinpinwish.git

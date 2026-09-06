@@ -9,11 +9,11 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@pinpinwish/shared": "*",
-    "@pinpinwish/price-tracker": "*"
+    "@pinpinwish/price-tracker": "*",
+    "@pinpinwish/shared": "*"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
-    "vitest": "^1.6.0"
+    "vitest": "^5.0.0"
   }
 }
