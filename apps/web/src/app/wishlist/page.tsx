@@ -26,6 +26,8 @@ const STATUS_TABS: { value: WishlistItemStatus | 'all'; label: string }[] = [
   { value: 'removed', label: 'Removed' },
 ]
 
+const WISHLIST_CURRENCY = 'EUR' as const
+
 export default function WishlistPage() {
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState<Category | 'all'>('all')
@@ -50,12 +52,13 @@ export default function WishlistPage() {
       maxPrice: maxPrice ? Number(maxPrice) : undefined,
       onlyUnresolved,
       onlyPossibleDuplicates: onlyDuplicates,
+      currency: WISHLIST_CURRENCY,
     }
-    return sortItems(applyFilters(itemsWithDuplicates, filters), sort)
+    return sortItems(applyFilters(itemsWithDuplicates, filters), sort, WISHLIST_CURRENCY)
   }, [search, category, priority, statusTab, sort, minPrice, maxPrice, onlyUnresolved, onlyDuplicates, itemsWithDuplicates])
 
   const wantedItems = itemsWithDuplicates.filter((i) => i.status === 'wanted')
-  const total = calculateTotal(wantedItems)
+  const total = calculateTotal(wantedItems, WISHLIST_CURRENCY)
 
   return (
     <main className="min-h-screen bg-neutral-50">
@@ -75,7 +78,7 @@ export default function WishlistPage() {
               <div className="mt-2 flex items-center gap-4 text-sm text-neutral-500">
                 <span>♡ {wantedItems.length} ITEMS</span>
                 <span className="text-neutral-300">|</span>
-                <span>{formatPrice(total, 'EUR')} TOTAL</span>
+                <span>{formatPrice(total, WISHLIST_CURRENCY)} TOTAL</span>
               </div>
             </div>
             {/* Search */}
@@ -146,7 +149,7 @@ export default function WishlistPage() {
             aria-label="Wishlist items"
           >
             {filteredItems.map((item) => (
-              <WishlistCard key={item.id} item={item} />
+              <WishlistCard key={item.id} item={item} currency={WISHLIST_CURRENCY} />
             ))}
           </div>
         )}

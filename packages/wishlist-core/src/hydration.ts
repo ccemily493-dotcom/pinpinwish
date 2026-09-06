@@ -7,6 +7,12 @@ export function hydrateWishlistItem(
   record: WishlistItemRecord,
   product: Product
 ): WishlistItemView {
+  if (record.productId && record.productId !== product.id) {
+    throw new Error(
+      `Cannot hydrate wishlist item ${record.id}: productId ${record.productId} does not match product ${product.id}`
+    )
+  }
+
   return {
     id: record.id,
     wishlistId: record.wishlistId,

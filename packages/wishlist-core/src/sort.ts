@@ -1,6 +1,7 @@
 import type { WishlistItem, WishlistSort } from './types'
 import { getBestOffer } from './totals'
 import { PRIORITY_ORDER } from '@pinpinwish/shared'
+import type { Currency } from '@pinpinwish/shared'
 
 /**
  * Sort wishlist items by the given sort configuration.
@@ -8,7 +9,8 @@ import { PRIORITY_ORDER } from '@pinpinwish/shared'
  */
 export function sortItems(
   items: WishlistItem[],
-  sort: WishlistSort
+  sort: WishlistSort,
+  currency: Currency
 ): WishlistItem[] {
   const sorted = [...items]
 
@@ -17,8 +19,13 @@ export function sortItems(
 
     switch (sort.field) {
       case 'price': {
-        const priceA = getBestOffer(a.product.offers)?.currentPrice ?? Infinity
-        const priceB = getBestOffer(b.product.offers)?.currentPrice ?? Infinity
+        const priceA = getBestOffer(a.product.offers, currency)?.currentPrice
+        const priceB = getBestOffer(b.product.offers, currency)?.currentPrice
+        // Items without a comparable offer in the requested currency stay last
+        // in both ascending and descending order.
+        if (priceA === undefined && priceB === undefined) return 0
+        if (priceA === undefined) return 1
+        if (priceB === undefined) return -1
         comparison = priceA - priceB
         break
       }

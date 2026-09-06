@@ -42,7 +42,9 @@ describe('SQL Migration Static Validation', () => {
     expect(content).toContain('refresh_token_ciphertext')
     expect(content).toContain('refresh_token_iv')
     expect(content).toContain('refresh_token_auth_tag')
-    expect(content).toContain('key_version')
+    expect(content).toContain('access_token_key_version')
+    expect(content).toContain('refresh_token_key_version')
+    expect(content).toContain('CONSTRAINT refresh_token_envelope_complete CHECK')
   })
 
   it('relates pinterest_connections to wishlist_sources via source_id', () => {
@@ -63,6 +65,7 @@ describe('SQL Migration Static Validation', () => {
     expect(content).toContain('variant_color')
     expect(content).toContain('sku')
     expect(content).toContain('variant_attributes JSONB')
+    expect(content).toContain('CREATE UNIQUE INDEX uq_product_images_one_primary')
   })
 
   it('enables Row Level Security on all tables', () => {

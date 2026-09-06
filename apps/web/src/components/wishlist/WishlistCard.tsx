@@ -2,6 +2,7 @@ import Link from 'next/link'
 import type { WishlistItem } from '@pinpinwish/wishlist-core'
 import { getBestOffer } from '@pinpinwish/wishlist-core'
 import { formatPrice } from '@pinpinwish/shared'
+import type { Currency } from '@pinpinwish/shared'
 
 const PRIORITY_STYLES = {
   dream: 'bg-purple-100 text-purple-700',
@@ -19,10 +20,11 @@ const PRIORITY_LABELS = {
 
 type Props = {
   item: WishlistItem
+  currency: Currency
 }
 
-export default function WishlistCard({ item }: Props) {
-  const bestOffer = getBestOffer(item.product.offers)
+export default function WishlistCard({ item, currency }: Props) {
+  const bestOffer = getBestOffer(item.product.offers, currency)
   const isUnresolved = item.product.offers.length === 0
   const isPurchased = item.status === 'purchased'
   const isRemoved = item.status === 'removed'

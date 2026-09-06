@@ -77,18 +77,30 @@ CREATE TABLE public.pinterest_connections (
   access_token_ciphertext     TEXT NOT NULL,
   access_token_iv             TEXT NOT NULL,
   access_token_auth_tag       TEXT NOT NULL,
+  access_token_key_version    INTEGER NOT NULL DEFAULT 1,
   -- Encrypted refresh token envelope (AES-256-GCM)
   refresh_token_ciphertext    TEXT,
   refresh_token_iv            TEXT,
   refresh_token_auth_tag      TEXT,
-  key_version                 INTEGER NOT NULL DEFAULT 1,
+  refresh_token_key_version   INTEGER,
   token_expires_at            TIMESTAMPTZ,
   scopes                      TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
   last_synced_at              TIMESTAMPTZ,
   created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(user_id, pinterest_user_id),
-  UNIQUE(source_id)
+  UNIQUE(source_id),
+  CONSTRAINT refresh_token_envelope_complete CHECK (
+    (refresh_token_ciphertext IS NULL
+      AND refresh_token_iv IS NULL
+      AND refresh_token_auth_tag IS NULL
+      AND refresh_token_key_version IS NULL)
+    OR
+    (refresh_token_ciphertext IS NOT NULL
+      AND refresh_token_iv IS NOT NULL
+      AND refresh_token_auth_tag IS NOT NULL
+      AND refresh_token_key_version IS NOT NULL)
+  )
 );
 
 COMMENT ON TABLE public.pinterest_connections IS
@@ -101,8 +113,10 @@ COMMENT ON COLUMN public.pinterest_connections.access_token_iv IS
   'Unique initialization vector / nonce for access token encryption.';
 COMMENT ON COLUMN public.pinterest_connections.access_token_auth_tag IS
   'AES-GCM authentication tag ensuring ciphertext integrity for access token.';
-COMMENT ON COLUMN public.pinterest_connections.key_version IS
-  'Key version for transparent key rotation.';
+COMMENT ON COLUMN public.pinterest_connections.access_token_key_version IS
+  'Encryption key version for independent access token rotation.';
+COMMENT ON COLUMN public.pinterest_connections.refresh_token_key_version IS
+  'Encryption key version for independent refresh token rotation.';
 
 CREATE INDEX idx_pinterest_connections_user_id ON public.pinterest_connections(user_id);
 CREATE INDEX idx_pinterest_connections_source_id ON public.pinterest_connections(source_id);
@@ -195,6 +209,9 @@ CREATE TABLE public.product_images (
 COMMENT ON TABLE public.product_images IS 'Multiple images per product with ordering and primary flag';
 CREATE INDEX idx_product_images_product_id ON public.product_images(product_id);
 CREATE INDEX idx_product_images_order ON public.product_images(product_id, display_order ASC);
+CREATE UNIQUE INDEX uq_product_images_one_primary
+  ON public.product_images(product_id)
+  WHERE is_primary = TRUE;
 
 -- ============================================================
 -- PRODUCT OFFERS (store-specific offers & extensible variants)

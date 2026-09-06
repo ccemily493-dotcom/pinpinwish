@@ -146,7 +146,8 @@ export interface WishlistFilters {
   status?: WishlistItemStatus
   minPrice?: number
   maxPrice?: number
-  currency?: Currency
+  /** Currency used for price comparison. No implicit FX conversion is performed. */
+  currency: Currency
   onlyUnresolved?: boolean
   onlyPossibleDuplicates?: boolean
 }

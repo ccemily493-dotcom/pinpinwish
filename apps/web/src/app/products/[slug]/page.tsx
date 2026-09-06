@@ -17,5 +17,5 @@ export default async function ProductPage({ params }: PageProps) {
   const item = MOCK_WISHLIST_ITEMS.find((i) => i.product.slug === resolvedParams.slug)
   if (!item) notFound()
 
-  return <ProductDetailView item={item} />
+  return <ProductDetailView item={item} currency="EUR" />
 }

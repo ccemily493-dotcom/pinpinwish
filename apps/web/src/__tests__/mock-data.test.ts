@@ -45,7 +45,7 @@ describe('Web Mock Data Integrity & Navigation/Filter Logic', () => {
   })
 
   it('calculates total correctly for wanted items only', () => {
-    const total = calculateTotal(MOCK_WISHLIST_ITEMS)
+    const total = calculateTotal(MOCK_WISHLIST_ITEMS, 'EUR')
     expect(total).toBeGreaterThan(0)
   })
 
@@ -88,14 +88,14 @@ describe('Web Mock Data Integrity & Navigation/Filter Logic', () => {
 
   it('filters and sorts mock items cleanly on client', () => {
     // Filter clothes
-    const clothes = applyFilters(MOCK_WISHLIST_ITEMS, { category: 'clothes' })
+    const clothes = applyFilters(MOCK_WISHLIST_ITEMS, { category: 'clothes', currency: 'EUR' })
     expect(clothes.length).toBeGreaterThan(0)
     expect(clothes.every((i) => i.product.category === 'clothes')).toBe(true)
 
     // Sort by price ascending
-    const sortedAsc = sortItems(clothes, { field: 'price', direction: 'asc' })
-    const priceFirst = getBestOffer(sortedAsc[0]!.product.offers)?.currentPrice ?? 0
-    const priceLast = getBestOffer(sortedAsc[sortedAsc.length - 1]!.product.offers)?.currentPrice ?? 0
+    const sortedAsc = sortItems(clothes, { field: 'price', direction: 'asc' }, 'EUR')
+    const priceFirst = getBestOffer(sortedAsc[0]!.product.offers, 'EUR')?.currentPrice ?? 0
+    const priceLast = getBestOffer(sortedAsc[sortedAsc.length - 1]!.product.offers, 'EUR')?.currentPrice ?? 0
     expect(priceFirst).toBeLessThanOrEqual(priceLast)
   })
 })

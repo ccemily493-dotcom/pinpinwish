@@ -5,18 +5,23 @@ import Link from 'next/link'
 import type { WishlistItem } from '@pinpinwish/wishlist-core'
 import { getBestOffer } from '@pinpinwish/wishlist-core'
 import { formatPrice, formatDate } from '@pinpinwish/shared'
+import type { Currency } from '@pinpinwish/shared'
 import type { ProductOffer, PriceObservation } from '@pinpinwish/price-tracker'
 
 interface Props {
   item: WishlistItem
+  currency: Currency
 }
 
-export default function ProductDetailView({ item }: Props) {
+export default function ProductDetailView({ item, currency }: Props) {
   const { product } = item
-  const bestOffer = getBestOffer(product.offers)
-  const sortedOffers = [...product.offers].sort(
-    (a, b) => a.currentPrice - b.currentPrice
-  )
+  const bestOffer = getBestOffer(product.offers, currency)
+  const sortedOffers = [...product.offers].sort((a, b) => {
+    if (a.currency === b.currency) return a.currentPrice - b.currentPrice
+    if (a.currency === currency) return -1
+    if (b.currency === currency) return 1
+    return a.currency.localeCompare(b.currency)
+  })
 
   // Track which store's price history is currently selected
   const offersWithHistory = product.offers.filter((o) => o.priceHistory.length > 0)

@@ -39,7 +39,7 @@ export function applyFilters(
 
   if (filters.minPrice !== undefined || filters.maxPrice !== undefined) {
     result = result.filter((item) => {
-      const best = getBestOffer(item.product.offers)
+      const best = getBestOffer(item.product.offers, filters.currency)
       const price = best?.currentPrice
       if (price === undefined) return false
       if (filters.minPrice !== undefined && price < filters.minPrice) return false

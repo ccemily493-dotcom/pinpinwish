@@ -56,7 +56,7 @@ describe('applyFilters', () => {
       makeItem({ id: 'a', product: { id: 'p1', slug: 'dress', name: 'Blue Dress', brand: 'Zara', category: 'clothes', offers: [] } }),
       makeItem({ id: 'b', product: { id: 'p2', slug: 'sneaker', name: 'White Sneakers', brand: 'Nike', category: 'shoes', offers: [] } }),
     ]
-    const result = applyFilters(items, { search: 'dress' })
+    const result = applyFilters(items, { search: 'dress', currency: 'EUR' })
     expect(result).toHaveLength(1)
     expect(result[0]?.id).toBe('a')
   })
@@ -66,7 +66,7 @@ describe('applyFilters', () => {
       makeItem({ id: 'a', product: { id: 'p1', slug: 'dress', name: 'Blue Dress', brand: 'Zara', category: 'clothes', offers: [] } }),
       makeItem({ id: 'b', product: { id: 'p2', slug: 'sneaker', name: 'White Sneakers', brand: 'Nike', category: 'shoes', offers: [] } }),
     ]
-    const result = applyFilters(items, { search: 'nike' })
+    const result = applyFilters(items, { search: 'nike', currency: 'EUR' })
     expect(result).toHaveLength(1)
     expect(result[0]?.id).toBe('b')
   })
@@ -76,7 +76,7 @@ describe('applyFilters', () => {
       makeItem({ id: 'a', product: { id: 'p1', slug: 'dress', name: 'Dress', brand: 'A', category: 'clothes', offers: [] } }),
       makeItem({ id: 'b', product: { id: 'p2', slug: 'cream', name: 'Face Cream', brand: 'B', category: 'beauty', offers: [] } }),
     ]
-    const result = applyFilters(items, { category: 'beauty' })
+    const result = applyFilters(items, { category: 'beauty', currency: 'EUR' })
     expect(result).toHaveLength(1)
     expect(result[0]?.id).toBe('b')
   })
@@ -86,7 +86,7 @@ describe('applyFilters', () => {
       makeItem({ id: 'a', priority: 'dream' }),
       makeItem({ id: 'b', priority: 'low' }),
     ]
-    const result = applyFilters(items, { priority: 'dream' })
+    const result = applyFilters(items, { priority: 'dream', currency: 'EUR' })
     expect(result).toHaveLength(1)
     expect(result[0]?.id).toBe('a')
   })
@@ -96,7 +96,7 @@ describe('applyFilters', () => {
       makeItem({ id: 'a', status: 'wanted' }),
       makeItem({ id: 'b', status: 'purchased' }),
     ]
-    const result = applyFilters(items, { status: 'purchased' })
+    const result = applyFilters(items, { status: 'purchased', currency: 'EUR' })
     expect(result).toHaveLength(1)
     expect(result[0]?.id).toBe('b')
   })
@@ -106,9 +106,19 @@ describe('applyFilters', () => {
       makeItem({ id: 'a', product: { id: 'p1', slug: 'a', name: 'A', category: 'clothes', offers: [makeOffer({ currentPrice: 50 })] } }),
       makeItem({ id: 'b', product: { id: 'p2', slug: 'b', name: 'B', category: 'clothes', offers: [makeOffer({ currentPrice: 200 })] } }),
     ]
-    const result = applyFilters(items, { minPrice: 40, maxPrice: 100 })
+    const result = applyFilters(items, { minPrice: 40, maxPrice: 100, currency: 'EUR' })
     expect(result).toHaveLength(1)
     expect(result[0]?.id).toBe('a')
+  })
+
+  it('does not use another currency for price filtering', () => {
+    const items = [
+      makeItem({ id: 'eur', product: { id: 'p1', slug: 'eur', name: 'EUR', category: 'clothes', offers: [makeOffer({ currentPrice: 80, currency: 'EUR' })] } }),
+      makeItem({ id: 'usd', product: { id: 'p2', slug: 'usd', name: 'USD', category: 'clothes', offers: [makeOffer({ currentPrice: 80, currency: 'USD' })] } }),
+    ]
+
+    const result = applyFilters(items, { minPrice: 50, maxPrice: 100, currency: 'EUR' })
+    expect(result.map((item) => item.id)).toEqual(['eur'])
   })
 
   it('filters by onlyUnresolved', () => {
@@ -116,7 +126,7 @@ describe('applyFilters', () => {
       makeItem({ id: 'a', product: { id: 'p1', slug: 'a', name: 'A', category: 'clothes', offers: [makeOffer()] } }),
       makeItem({ id: 'b', product: { id: 'p2', slug: 'b', name: 'B', category: 'clothes', offers: [] } }),
     ]
-    const result = applyFilters(items, { onlyUnresolved: true })
+    const result = applyFilters(items, { onlyUnresolved: true, currency: 'EUR' })
     expect(result).toHaveLength(1)
     expect(result[0]?.id).toBe('b')
   })
@@ -126,14 +136,14 @@ describe('applyFilters', () => {
       makeItem({ id: 'a' }),
       makeItem({ id: 'b', possibleDuplicateOf: 'a' }),
     ]
-    const result = applyFilters(items, { onlyPossibleDuplicates: true })
+    const result = applyFilters(items, { onlyPossibleDuplicates: true, currency: 'EUR' })
     expect(result).toHaveLength(1)
     expect(result[0]?.id).toBe('b')
   })
 
   it('returns empty array when no items match', () => {
     const items = [makeItem({ id: 'a', priority: 'low' })]
-    const result = applyFilters(items, { priority: 'dream' })
+    const result = applyFilters(items, { priority: 'dream', currency: 'EUR' })
     expect(result).toHaveLength(0)
   })
 })
@@ -146,7 +156,7 @@ describe('sortItems', () => {
       makeItem({ id: 'a', product: { id: 'p1', slug: 'a', name: 'A', category: 'clothes', offers: [makeOffer({ currentPrice: 200 })] } }),
       makeItem({ id: 'b', product: { id: 'p2', slug: 'b', name: 'B', category: 'clothes', offers: [makeOffer({ currentPrice: 50 })] } }),
     ]
-    const result = sortItems(items, { field: 'price', direction: 'asc' })
+    const result = sortItems(items, { field: 'price', direction: 'asc' }, 'EUR')
     expect(result[0]?.id).toBe('b')
     expect(result[1]?.id).toBe('a')
   })
@@ -156,7 +166,7 @@ describe('sortItems', () => {
       makeItem({ id: 'a', product: { id: 'p1', slug: 'a', name: 'A', category: 'clothes', offers: [makeOffer({ currentPrice: 50 })] } }),
       makeItem({ id: 'b', product: { id: 'p2', slug: 'b', name: 'B', category: 'clothes', offers: [makeOffer({ currentPrice: 200 })] } }),
     ]
-    const result = sortItems(items, { field: 'price', direction: 'desc' })
+    const result = sortItems(items, { field: 'price', direction: 'desc' }, 'EUR')
     expect(result[0]?.id).toBe('b')
     expect(result[1]?.id).toBe('a')
   })
@@ -166,7 +176,7 @@ describe('sortItems', () => {
       makeItem({ id: 'a', createdAt: new Date('2024-03-01') }),
       makeItem({ id: 'b', createdAt: new Date('2024-01-01') }),
     ]
-    const result = sortItems(items, { field: 'date', direction: 'asc' })
+    const result = sortItems(items, { field: 'date', direction: 'asc' }, 'EUR')
     expect(result[0]?.id).toBe('b')
     expect(result[1]?.id).toBe('a')
   })
@@ -176,7 +186,7 @@ describe('sortItems', () => {
       makeItem({ id: 'a', createdAt: new Date('2024-01-01') }),
       makeItem({ id: 'b', createdAt: new Date('2024-03-01') }),
     ]
-    const result = sortItems(items, { field: 'date', direction: 'desc' })
+    const result = sortItems(items, { field: 'date', direction: 'desc' }, 'EUR')
     expect(result[0]?.id).toBe('b')
     expect(result[1]?.id).toBe('a')
   })
@@ -187,8 +197,16 @@ describe('sortItems', () => {
       makeItem({ id: 'b' }),
     ]
     const original = [...items]
-    sortItems(items, { field: 'price', direction: 'asc' })
+    sortItems(items, { field: 'price', direction: 'asc' }, 'EUR')
     expect(items[0]?.id).toBe(original[0]?.id)
+  })
+
+  it('keeps items without an offer in the requested currency last in either direction', () => {
+    const eur = makeItem({ id: 'eur', product: { id: 'p1', slug: 'eur', name: 'EUR', category: 'clothes', offers: [makeOffer({ currentPrice: 80, currency: 'EUR' })] } })
+    const usd = makeItem({ id: 'usd', product: { id: 'p2', slug: 'usd', name: 'USD', category: 'clothes', offers: [makeOffer({ currentPrice: 1, currency: 'USD' })] } })
+
+    expect(sortItems([usd, eur], { field: 'price', direction: 'asc' }, 'EUR').map((item) => item.id)).toEqual(['eur', 'usd'])
+    expect(sortItems([usd, eur], { field: 'price', direction: 'desc' }, 'EUR').map((item) => item.id)).toEqual(['eur', 'usd'])
   })
 })
 
@@ -200,7 +218,7 @@ describe('calculateTotal', () => {
       makeItem({ id: 'a', status: 'wanted', product: { id: 'p1', slug: 'a', name: 'A', category: 'clothes', offers: [makeOffer({ currentPrice: 100 })] } }),
       makeItem({ id: 'b', status: 'wanted', product: { id: 'p2', slug: 'b', name: 'B', category: 'clothes', offers: [makeOffer({ currentPrice: 50 })] } }),
     ]
-    expect(calculateTotal(items)).toBe(150)
+    expect(calculateTotal(items, 'EUR')).toBe(150)
   })
 
   it('excludes purchased items from total', () => {
@@ -208,7 +226,7 @@ describe('calculateTotal', () => {
       makeItem({ id: 'a', status: 'wanted', product: { id: 'p1', slug: 'a', name: 'A', category: 'clothes', offers: [makeOffer({ currentPrice: 100 })] } }),
       makeItem({ id: 'b', status: 'purchased', product: { id: 'p2', slug: 'b', name: 'B', category: 'clothes', offers: [makeOffer({ currentPrice: 50 })] } }),
     ]
-    expect(calculateTotal(items)).toBe(100)
+    expect(calculateTotal(items, 'EUR')).toBe(100)
   })
 
   it('excludes removed items from total', () => {
@@ -216,24 +234,52 @@ describe('calculateTotal', () => {
       makeItem({ id: 'a', status: 'wanted', product: { id: 'p1', slug: 'a', name: 'A', category: 'clothes', offers: [makeOffer({ currentPrice: 100 })] } }),
       makeItem({ id: 'b', status: 'removed', product: { id: 'p2', slug: 'b', name: 'B', category: 'clothes', offers: [makeOffer({ currentPrice: 50 })] } }),
     ]
-    expect(calculateTotal(items)).toBe(100)
+    expect(calculateTotal(items, 'EUR')).toBe(100)
   })
 
   it('returns 0 for empty list', () => {
-    expect(calculateTotal([])).toBe(0)
+    expect(calculateTotal([], 'EUR')).toBe(0)
   })
 
   it('handles items with no offers', () => {
     const items = [
       makeItem({ id: 'a', status: 'wanted', product: { id: 'p1', slug: 'a', name: 'A', category: 'clothes', offers: [] } }),
     ]
-    expect(calculateTotal(items)).toBe(0)
+    expect(calculateTotal(items, 'EUR')).toBe(0)
+  })
+
+  it('never adds an offer denominated in another currency', () => {
+    const items = [
+      makeItem({
+        id: 'eur-item',
+        product: {
+          id: 'eur-product',
+          slug: 'eur-product',
+          name: 'EUR Product',
+          category: 'clothes',
+          offers: [makeOffer({ currentPrice: 100, currency: 'EUR' })],
+        },
+      }),
+      makeItem({
+        id: 'usd-item',
+        product: {
+          id: 'usd-product',
+          slug: 'usd-product',
+          name: 'USD Product',
+          category: 'clothes',
+          offers: [makeOffer({ currentPrice: 1, currency: 'USD' })],
+        },
+      }),
+    ]
+
+    expect(calculateTotal(items, 'EUR')).toBe(100)
+    expect(calculateTotal(items, 'USD')).toBe(1)
   })
 })
 
 describe('getBestOffer', () => {
   it('returns undefined for empty offers', () => {
-    expect(getBestOffer([])).toBeUndefined()
+    expect(getBestOffer([], 'EUR')).toBeUndefined()
   })
 
   it('returns the cheapest in-stock offer', () => {
@@ -242,7 +288,7 @@ describe('getBestOffer', () => {
       makeOffer({ id: 'o2', currentPrice: 80, availability: 'in_stock' }),
       makeOffer({ id: 'o3', currentPrice: 60, availability: 'out_of_stock' }),
     ]
-    const best = getBestOffer(offers)
+    const best = getBestOffer(offers, 'EUR')
     expect(best?.id).toBe('o2')
     expect(best?.currentPrice).toBe(80)
   })
@@ -252,7 +298,7 @@ describe('getBestOffer', () => {
       makeOffer({ id: 'o-instock', currentPrice: 100, availability: 'in_stock' }),
       makeOffer({ id: 'o-unknown', currentPrice: 70, availability: 'unknown' }),
     ]
-    const best = getBestOffer(offers)
+    const best = getBestOffer(offers, 'EUR')
     expect(best?.id).toBe('o-instock')
     expect(best?.currentPrice).toBe(100)
   })
@@ -262,7 +308,7 @@ describe('getBestOffer', () => {
       makeOffer({ id: 'o-unknown', currentPrice: 100, availability: 'unknown' }),
       makeOffer({ id: 'o-outofstock', currentPrice: 50, availability: 'out_of_stock' }),
     ]
-    const best = getBestOffer(offers)
+    const best = getBestOffer(offers, 'EUR')
     expect(best?.id).toBe('o-unknown')
     expect(best?.currentPrice).toBe(100)
   })
@@ -272,9 +318,20 @@ describe('getBestOffer', () => {
       makeOffer({ id: 'o1', currentPrice: 100, availability: 'out_of_stock' }),
       makeOffer({ id: 'o2', currentPrice: 120, availability: 'out_of_stock' }),
     ]
-    const best = getBestOffer(offers)
+    const best = getBestOffer(offers, 'EUR')
     expect(best?.id).toBe('o1')
     expect(best?.availability).toBe('out_of_stock')
+  })
+
+  it('ignores numerically cheaper offers in another currency', () => {
+    const offers = [
+      makeOffer({ id: 'eur', currentPrice: 100, currency: 'EUR' }),
+      makeOffer({ id: 'usd', currentPrice: 1, currency: 'USD' }),
+    ]
+
+    expect(getBestOffer(offers, 'EUR')?.id).toBe('eur')
+    expect(getBestOffer(offers, 'USD')?.id).toBe('usd')
+    expect(getBestOffer(offers, 'GBP')).toBeUndefined()
   })
 })
 
@@ -444,5 +501,26 @@ describe('Hydration and Idempotency Contracts', () => {
   it('returns undefined if sourceId or sourceItemId is missing', () => {
     expect(computeSourceIdempotencyKey('wl-123', undefined, 'item-789')).toBeUndefined()
     expect(computeSourceIdempotencyKey('wl-123', 'src-pin-456', undefined)).toBeUndefined()
+  })
+
+  it('rejects hydration when record and product identifiers differ', () => {
+    const record: WishlistItemRecord = {
+      id: 'rec-mismatch',
+      wishlistId: 'wl-1',
+      productId: 'product-a',
+      priority: 'medium',
+      status: 'wanted',
+      createdAt: new Date('2024-05-01'),
+      updatedAt: new Date('2024-05-01'),
+    }
+    const product: Product = {
+      id: 'product-b',
+      slug: 'product-b',
+      name: 'Different product',
+      category: 'other',
+      offers: [],
+    }
+
+    expect(() => hydrateWishlistItem(record, product)).toThrow(/does not match/)
   })
 })
