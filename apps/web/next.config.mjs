@@ -5,6 +5,8 @@ const nextConfig = {
     '@pinpinwish/wishlist-core',
     '@pinpinwish/price-tracker',
     '@pinpinwish/pinterest-connector',
+    '@pinpinwish/product-resolver',
+    '@pinpinwish/product-search',
   ],
 }
 

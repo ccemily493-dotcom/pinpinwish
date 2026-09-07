@@ -1,8 +1,4 @@
-/**
- * product-resolver types
- * These types define the contract for product resolution.
- * Phase 3 will add real resolution algorithms.
- */
+import type { Availability, Category, Currency, OfferVariantInfo, ProductMatchType } from '@pinpinwish/shared'
 
 export interface PinterestPinInput {
   pinterestPinId: string
@@ -10,28 +6,70 @@ export interface PinterestPinInput {
   description?: string
   link?: string
   imageUrl?: string
+  localImagePath?: string
+  boardPosition?: number
 }
 
-export type MatchType = 'exact' | 'probable' | 'similar' | 'unresolved'
+export type MatchType = ProductMatchType
+
+export interface ParsedProductOffer {
+  store: string
+  storeUrl: string
+  price?: number
+  currency?: Currency
+  availability?: Availability
+  variant?: OfferVariantInfo
+}
+
+export interface ParsedProductMetadata {
+  name?: string
+  brand?: string
+  category?: Category
+  description?: string
+  imageUrl?: string
+  images?: string[]
+  sku?: string
+  offers: ParsedProductOffer[]
+  sourceType: 'json-ld' | 'opengraph' | 'microdata' | 'visual' | 'none'
+  rawQualityScore: number
+}
 
 export interface ProductMatch {
   name: string
   brand?: string
+  category?: Category
   imageUrl?: string
+  localImagePath?: string
+  images?: string[]
   productUrl?: string
   store?: string
   price?: number
-  currency?: string
-  availability?: string
+  currency?: Currency
+  availability?: Availability
+  sku?: string
+  variant?: OfferVariantInfo
   confidence: number
   matchType: MatchType
+  evidence?: {
+    strategyUsed: string
+    nameSimilarity?: number
+    brandMatch?: boolean
+    domainMatch?: boolean
+    jsonLdFound?: boolean
+    visualMatchFound?: boolean
+    skuMatched?: boolean
+    details?: string
+  }
+}
+
+export interface ProductResolverOptions {
+  visualSearchProvider?: import('@pinpinwish/product-search').VisualProductSearchProvider
+  fetchTimeoutMs?: number
 }
 
 export interface ProductResolver {
   /**
    * Attempt to resolve a Pinterest pin into a product match.
-   * Phase 1: Always returns unresolved with confidence 0.
-   * Phase 3: Will use real resolution strategies.
    */
-  resolve(pin: PinterestPinInput): Promise<ProductMatch>
+  resolve(pin: PinterestPinInput, signal?: AbortSignal): Promise<ProductMatch>
 }

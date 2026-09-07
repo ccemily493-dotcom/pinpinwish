@@ -1,15 +1,15 @@
 import { NextResponse } from 'next/server'
-import { isSupabaseConfigured } from '@/lib/env/public'
-import { isPinterestConfigured, isServerSupabaseConfigured } from '@/lib/env/server'
+import { getDatabasePath } from '@/lib/db/connection'
 
 export function GET() {
   return NextResponse.json({
     ok: true,
-    mode: isServerSupabaseConfigured() ? 'cloud' : 'local-demo',
+    mode: 'local',
     services: {
-      supabasePublic: isSupabaseConfigured(),
-      supabaseServer: isServerSupabaseConfigured(),
-      pinterest: isPinterestConfigured(),
+      sqlite: true,
+      pinterestAutomation: true,
+      visualSearch: 'opt-in',
     },
+    database: getDatabasePath().split(/[\\/]/).pop(),
   })
 }

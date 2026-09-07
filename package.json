@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace=apps/web",
+    "browser:install": "playwright install chromium",
     "build": "npm run build --workspace=apps/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
@@ -17,10 +18,7 @@
     "postcss": "^8.5.28"
   },
   "engines": {
-    "node": ">=20.9.0",
+    "node": ">=24.0.0",
     "npm": ">=9.0.0"
-  },
-  "devDependencies": {
-    "supabase": "^2.116.0"
   }
 }

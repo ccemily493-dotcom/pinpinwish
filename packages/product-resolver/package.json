@@ -8,6 +8,12 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@pinpinwish/price-tracker": "*",
+    "@pinpinwish/product-search": "*",
+    "@pinpinwish/shared": "*",
+    "cheerio": "^1.0.0"
+  },
   "devDependencies": {
     "typescript": "^5.4.0",
     "vitest": "^5.0.0"

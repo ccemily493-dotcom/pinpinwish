@@ -5,8 +5,13 @@ import type {
   SourceType,
   Currency,
   ProductImage,
+  ResolutionStatus,
+  ProductMatchType,
+  SourceSyncInput,
 } from '@pinpinwish/shared'
-import type { ProductOffer, ProductOfferRecord } from '@pinpinwish/price-tracker'
+import type { ProductOffer } from '@pinpinwish/price-tracker'
+
+export type { SourceSyncInput, SourceSyncProgress } from '@pinpinwish/shared'
 
 // ─── Source Adapter Contract ─────────────────────────────────────────────────
 
@@ -26,14 +31,10 @@ export interface SourceSyncResult<TItem = unknown> {
 /**
  * WishlistSourceAdapter — the core abstraction that keeps the wishlist
  * decoupled from any specific source (Pinterest, Instagram, etc.).
- *
- * Design decision: This adapter pattern ensures the wishlist never
- * depends directly on Pinterest or any other source. New sources
- * can be added by implementing this interface without touching wishlist-core.
  */
 export interface WishlistSourceAdapter {
   readonly sourceType: string
-  sync(cursor?: string): Promise<SourceSyncResult>
+  sync(input?: SourceSyncInput | string): Promise<SourceSyncResult>
 }
 
 // ─── Persistent Records (Database / Storage Entities) ────────────────────────
@@ -45,6 +46,7 @@ export interface ProductRecord {
   brand?: string
   category: Category
   imageUrl?: string
+  localImagePath?: string
   description?: string
   createdAt?: Date
   updatedAt?: Date
@@ -74,7 +76,8 @@ export interface WishlistItemRecord {
   sourceItemId?: string
   /** Original source URL when it is safe to expose to the UI. */
   pinUrl?: string
-  resolutionStatus?: 'pending' | 'resolved' | 'needs_review'
+  resolutionStatus?: ResolutionStatus
+  matchType?: ProductMatchType
   confidence?: number
   manualOverride?: boolean
   priority: Priority
@@ -97,6 +100,7 @@ export interface Product {
   brand?: string
   category: Category
   imageUrl?: string
+  localImagePath?: string
   images?: ProductImage[]
   description?: string
   offers: ProductOffer[]
@@ -115,7 +119,8 @@ export interface WishlistItemView {
   sourceType?: SourceType
   sourceItemId?: string
   pinUrl?: string
-  resolutionStatus?: 'pending' | 'resolved' | 'needs_review'
+  resolutionStatus?: ResolutionStatus
+  matchType?: ProductMatchType
   confidence?: number
   manualOverride?: boolean
   priority: Priority

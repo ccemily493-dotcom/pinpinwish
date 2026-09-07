@@ -6,12 +6,14 @@
   "types": "./src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "echo \"No tests in product-search (contracts only)\""
+    "test": "vitest run"
   },
   "dependencies": {
-    "@pinpinwish/shared": "*"
+    "@pinpinwish/shared": "*",
+    "playwright": "^1.63.0"
   },
   "devDependencies": {
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^5.0.0"
   }
 }

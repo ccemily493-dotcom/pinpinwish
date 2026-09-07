@@ -9,7 +9,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@pinpinwish/shared": "*"
+    "@pinpinwish/shared": "*",
+    "@pinpinwish/wishlist-core": "*",
+    "playwright": "^1.63.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

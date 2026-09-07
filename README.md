@@ -1,58 +1,64 @@
 # PinPinWish
 
-Wishlist personal que convierte un tablero de Pinterest en una lista visual y editable usando exclusivamente la API oficial de Pinterest.
+Wishlist personal y local que importa un tablero de Pinterest, descarga sus imágenes, analiza los enlaces de producto y guarda el resultado en SQLite.
 
-## Estado actual: MVP utilizable
+## Estado
 
-- Modo local inmediato con persistencia en `localStorage`.
-- Añadir productos manualmente, editar prioridad y marcar como comprado/eliminado.
-- Búsqueda, categorías, filtros de precio, prioridades, estados y duplicados posibles.
-- Página de producto, ofertas por tienda e histórico de precio separado por oferta.
-- Autenticación por magic link con Supabase cuando se configura.
-- OAuth oficial de Pinterest con tokens cifrados mediante AES-256-GCM.
-- Selección de tablero e importación paginada sin bloquear la interfaz.
-- Sincronización idempotente: un Pin no crea dos artículos en la misma wishlist.
-- Detección de Pins retirados mediante la generación de importación.
-- Cola `Needs Review` y resolución manual con prioridad sobre futuras automatizaciones.
+- Aplicación Next.js local, sin Supabase ni cuentas de PinPinWish.
+- Importación automática de tableros públicos mediante Playwright.
+- Perfil de navegador persistente para tableros privados; Pinterest puede exigir iniciar sesión una vez.
+- Recorrido completo del tablero hasta que dejan de aparecer Pins nuevos.
+- Lectura automática de cada Pin para recuperar descripción, imagen y enlace de destino.
+- Resolución conservadora mediante JSON-LD, Open Graph y microdatos.
+- Búsqueda visual experimental con Google Lens disponible únicamente como opción explícita: al activarla, la imagen se envía a Google.
+- SQLite, imágenes y sesión guardados únicamente en `.data/`.
+- Importaciones idempotentes y recuperables al volver a abrir el panel.
 
-La identificación y búsqueda automática de productos permanece deliberadamente desactivada hasta conectar proveedores reales. PinPinWish nunca inventa una coincidencia.
+## Requisitos
 
-## Ejecutar gratis en local
+- Node.js 24 o superior.
+- npm 9 o superior.
 
-Requisitos: Node.js 20.9 o superior y npm 9 o superior.
+## Instalación
 
 ```bash
 npm install
+npm run browser:install
+```
+
+## Ejecutar
+
+```bash
 npm run dev
 ```
 
-Abre `http://localhost:3000/wishlist`. No necesitas cuentas ni claves para usar el modo local.
+Abre `http://localhost:3000/wishlist`, pulsa **Import from Pinterest** y pega la URL completa del tablero.
 
-## Activar cuenta y Pinterest
+No se necesitan variables de entorno ni claves. Para guardar los datos en otra carpeta, configura `PINPINWISH_DATA_DIR` con una ruta local.
 
-1. Crea un proyecto gratuito de Supabase.
-2. Ejecuta, en orden, `supabase/migrations/001_foundation.sql` y `002_mvp_auth_import.sql` desde el SQL Editor de Supabase.
-3. Crea una app en el portal oficial de desarrolladores de Pinterest y configura como callback `http://localhost:3000/api/pinterest/callback`.
-4. Copia `.env.example` como `.env.local` y completa únicamente tus propias claves.
-5. Genera `OAUTH_TOKEN_ENCRYPTION_KEY` con `openssl rand -hex 32` o cualquier generador criptográfico de 32 bytes.
-6. Reinicia `npm run dev`, inicia sesión y abre `/onboarding`.
+## Datos privados
 
-Ningún secreto debe llevar el prefijo `NEXT_PUBLIC_`. Los tokens de Pinterest se cifran en servidor antes de almacenarse.
+La carpeta `.data/` contiene:
+
+- `pinpinwish.db`: wishlist y trabajos de importación.
+- `images/`: imágenes descargadas.
+- `pinterest-profile/`: cookies y sesión del navegador.
+
+La carpeta está excluida de Git. PinPinWish nunca solicita ni almacena la contraseña de Pinterest.
 
 ## Arquitectura
 
 ```text
-apps/web                         Next.js, UI, rutas de servidor y Supabase
-packages/pinterest-connector     API oficial, normalización y cifrado
-packages/product-resolver        Contratos de identificación conservadora
-packages/product-search          Interfaz desacoplada para buscadores futuros
+apps/web                         Next.js, UI, API local, SQLite e importador
+packages/pinterest-connector     Automatización Playwright y descarga de imágenes
+packages/product-resolver        Metadata de tiendas y confidence scoring
+packages/product-search          Proveedores reemplazables de búsqueda visual
 packages/price-tracker           Ofertas e histórico de precios
 packages/wishlist-core           Dominio, filtros, totales, estados y fuentes
-packages/shared                  Tipos y utilidades compartidas
-supabase/migrations              Esquema PostgreSQL y RLS
+packages/shared                  Tipos, validación y seguridad compartida
 ```
 
-`wishlist-core` depende de `WishlistSourceAdapter`, no de Pinterest. Esto permite añadir URL manual, imagen, Instagram, TikTok o extensión de navegador sin acoplar la wishlist.
+`wishlist-core` depende del contrato `WishlistSourceAdapter`, no de Pinterest, para permitir futuras fuentes.
 
 ## Calidad
 
@@ -61,11 +67,11 @@ npm run typecheck
 npm test
 npm run lint
 npm run build
-npm audit --omit=dev
 ```
 
-## Límites actuales
+## Limitaciones
 
-- Pinterest exige que la aplicación sea aceptada/configurada por Pinterest; el código no sustituye ese requisito.
-- No hay scraping directo de Pinterest.
-- La resolución automática de productos y el seguimiento programado de precios son la siguiente fase y necesitan proveedores reales o integraciones específicas por tienda.
+- Pinterest y Google Lens pueden cambiar su HTML o bloquear automatizaciones; esos fallos dejan el Pin como `unresolved` y no detienen el resto de la importación.
+- PinPinWish no evade CAPTCHA.
+- La automatización de páginas puede estar restringida por las condiciones de los servicios. Usa únicamente tableros e imágenes a los que tengas acceso legítimo.
+- Sin búsqueda visual, un Pin sin enlace comercial solo puede identificarse mediante su título, descripción y metadata disponible.

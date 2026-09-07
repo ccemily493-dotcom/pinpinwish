@@ -1,2 +1,5 @@
 export * from './types'
+export * from './html-parser'
+export * from './confidence-scorer'
+export * from './link-fetcher'
 export * from './resolver'
