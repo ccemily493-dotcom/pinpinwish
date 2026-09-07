@@ -26,6 +26,26 @@ describe('Pinterest Connector & Scraper Suite', () => {
         })
       ).toBe(true)
     })
+
+    it('never accepts a login page even if a profile-like element is present', () => {
+      expect(
+        determinePinterestLoginState({
+          hasProfileButton: true,
+          hasLoginButton: false,
+          url: 'https://www.pinterest.com/login/',
+        })
+      ).toBe(false)
+    })
+
+    it('never accepts a page that still presents the login action', () => {
+      expect(
+        determinePinterestLoginState({
+          hasProfileButton: true,
+          hasLoginButton: true,
+          url: 'https://www.pinterest.com/',
+        })
+      ).toBe(false)
+    })
   })
 
   const fixturePath = path.resolve(__dirname, 'fixtures', 'board-sample.html')

@@ -8,7 +8,7 @@ export function GET() {
     services: {
       sqlite: true,
       pinterestAutomation: true,
-      visualSearch: 'opt-in',
+      visualSearch: 'automatic',
     },
     database: getDatabasePath().split(/[\\/]/).pop(),
   })

@@ -10,7 +10,7 @@ Wishlist personal y local que importa un tablero de Pinterest, descarga sus imá
 - Recorrido completo del tablero hasta que dejan de aparecer Pins nuevos.
 - Lectura automática de cada Pin para recuperar descripción, imagen y enlace de destino.
 - Resolución conservadora mediante JSON-LD, Open Graph y microdatos.
-- Búsqueda visual experimental con Google Lens disponible únicamente como opción explícita: al activarla, la imagen se envía a Google.
+- Búsqueda visual automática con Google Lens como fallback: las imágenes que no se resuelven por enlace o metadata se envían a Google para buscar coincidencias.
 - SQLite, imágenes y sesión guardados únicamente en `.data/`.
 - Importaciones idempotentes y recuperables al volver a abrir el panel.
 
@@ -32,7 +32,7 @@ npm run browser:install
 npm run dev
 ```
 
-Abre `http://localhost:3000/wishlist`, pulsa **Import from Pinterest** y pega la URL completa del tablero.
+Abre `http://localhost:3000/wishlist`, pulsa **Import from Pinterest** y pega la URL completa del tablero. Si todavía no existe una sesión local, el mismo botón abrirá Pinterest para iniciar sesión una vez y continuará la importación automáticamente al terminar.
 
 No se necesitan variables de entorno ni claves. Para guardar los datos en otra carpeta, configura `PINPINWISH_DATA_DIR` con una ruta local.
 
@@ -74,4 +74,4 @@ npm run build
 - Pinterest y Google Lens pueden cambiar su HTML o bloquear automatizaciones; esos fallos dejan el Pin como `unresolved` y no detienen el resto de la importación.
 - PinPinWish no evade CAPTCHA.
 - La automatización de páginas puede estar restringida por las condiciones de los servicios. Usa únicamente tableros e imágenes a los que tengas acceso legítimo.
-- Sin búsqueda visual, un Pin sin enlace comercial solo puede identificarse mediante su título, descripción y metadata disponible.
+- La búsqueda visual es automática, pero puede no devolver una coincidencia fiable; esos Pins pasan a **Needs Review** sin inventar un producto.

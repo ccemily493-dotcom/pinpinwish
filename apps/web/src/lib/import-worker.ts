@@ -68,7 +68,7 @@ function launchImportJob(
   wishlistId: string,
   userId: string,
   sourceId: string,
-  enableVisualSearch?: boolean
+  enableVisualSearch = true
 ) {
   if (activeJobControllers.has(jobId)) return
   const controller = new AbortController()
@@ -117,7 +117,7 @@ async function runBackgroundImport(
   userId: string,
   sourceId: string,
   signal: AbortSignal,
-  enableVisualSearch = false
+  enableVisualSearch = true
 ) {
   try {
     updateImportJob(jobId, { status: 'running' })

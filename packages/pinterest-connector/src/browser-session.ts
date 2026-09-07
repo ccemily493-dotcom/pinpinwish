@@ -1,6 +1,6 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { chromium, type BrowserContext } from 'playwright'
+import { chromium, type BrowserContext, type Page } from 'playwright'
 import type { PinterestSessionStatus } from './types'
 
 export function getDefaultDataDir(): string {
@@ -51,6 +51,27 @@ export async function createPersistentContext(options: {
   return context
 }
 
+async function readPinterestLoginIndicators(page: Page): Promise<{
+  hasProfileButton: boolean
+  hasLoginButton: boolean
+  url: string
+}> {
+  return page.evaluate(() => {
+    const profileButton = document.querySelector(
+      '[data-test-id="header-profile"], [data-test-id="user-profile-button"], a[href^="/"][aria-label*="profile"], a[href^="/"][aria-label*="Profile"]'
+    )
+    const loginButton = document.querySelector(
+      '[data-test-id="simple-login-button"], button[aria-label="Log in"], a[href*="/login/"]'
+    )
+
+    return {
+      hasProfileButton: Boolean(profileButton),
+      hasLoginButton: Boolean(loginButton),
+      url: window.location.href,
+    }
+  })
+}
+
 /**
  * Checks if the persistent profile has an active Pinterest session.
  */
@@ -76,21 +97,7 @@ export async function checkPinterestSession(userDataDir?: string): Promise<Pinte
     // Allow dynamic navbar to render
     await page.waitForTimeout(1500)
 
-    // Check for logged-in indicators
-    const check = await page.evaluate(() => {
-      const profileButton = document.querySelector(
-        '[data-test-id="header-profile"], [data-test-id="user-profile-button"], a[href^="/"][aria-label*="profile"], a[href^="/"][aria-label*="Profile"]'
-      )
-      const loginButton = document.querySelector(
-        '[data-test-id="simple-login-button"], button[aria-label="Log in"], a[href*="/login/"]'
-      )
-
-      return {
-        hasProfileButton: Boolean(profileButton),
-        hasLoginButton: Boolean(loginButton),
-        url: window.location.href,
-      }
-    })
+    const check = await readPinterestLoginIndicators(page)
 
     const isLoggedIn = determinePinterestLoginState(check)
 
@@ -131,7 +138,7 @@ export async function openPinterestLoginWindow(options: {
   timeoutMs?: number
 } = {}): Promise<{ success: boolean; message: string }> {
   const userDataDir = options.userDataDir || getDefaultUserDataDir()
-  const timeoutMs = options.timeoutMs ?? 180000 // 3 minutes for user interaction
+  const timeoutMs = options.timeoutMs ?? 300000 // 5 minutes for user interaction
 
   let context: BrowserContext | null = null
   try {
@@ -147,19 +154,33 @@ export async function openPinterestLoginWindow(options: {
       timeout: 30000,
     })
 
-    // Wait until user navigates away from login / is logged in, or closes the window
-    await Promise.race([
-      page.waitForURL((url) => !url.pathname.includes('/login') && url.hostname.includes('pinterest.com'), {
-        timeout: timeoutMs,
-      }),
-      new Promise((resolve) => page.on('close', resolve)),
-    ])
+    const deadline = Date.now() + timeoutMs
+    let authenticated = false
 
-    await new Promise((r) => setTimeout(r, 1000))
+    while (Date.now() < deadline) {
+      for (const candidate of context.pages()) {
+        if (candidate.isClosed() || !candidate.url().includes('pinterest.')) continue
+
+        try {
+          if (determinePinterestLoginState(await readPinterestLoginIndicators(candidate))) {
+            authenticated = true
+            break
+          }
+        } catch {
+          // Navigation can briefly destroy the page context while login completes.
+        }
+      }
+
+      if (authenticated) break
+      if (context.pages().every((candidate) => candidate.isClosed())) break
+      await new Promise((resolve) => setTimeout(resolve, 750))
+    }
 
     return {
-      success: true,
-      message: 'Pinterest login window completed. Session stored locally.',
+      success: authenticated,
+      message: authenticated
+        ? 'Pinterest login confirmed. Session stored locally.'
+        : 'Pinterest login was not completed or the window was closed.',
     }
   } catch (err) {
     return {

@@ -58,27 +58,38 @@ export default function PinterestOnboarding({ configured: _configured }: { confi
     return () => clearInterval(interval)
   }, [job])
 
-  async function handleOpenLogin() {
+  async function connectPinterest(): Promise<SessionInfo | null> {
     setLoggingIn(true)
     setError(undefined)
     try {
       const res = await fetch('/api/pinterest/session', { method: 'POST' })
-      if (res.ok) {
-        const data = (await res.json()) as { session: SessionInfo }
-        setSession(data.session)
+      const data = (await res.json()) as {
+        session?: SessionInfo
+        result?: { message?: string }
+        error?: string
       }
+
+      if (!res.ok || !data.session?.isLoggedIn) {
+        throw new Error(
+          data.result?.message || data.error || 'Pinterest login could not be confirmed. Please try again.'
+        )
+      }
+
+      setSession(data.session)
+      return data.session
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not open login window')
+      return null
     } finally {
       setLoggingIn(false)
     }
   }
 
+  async function handleOpenLogin() {
+    await connectPinterest()
+  }
+
   async function handleStartImport() {
-    if (!session?.isLoggedIn) {
-      setError('Open Pinterest login once before starting the automatic import.')
-      return
-    }
     if (!boardUrl.trim()) {
       setError('Please paste a Pinterest board URL')
       return
@@ -87,6 +98,12 @@ export default function PinterestOnboarding({ configured: _configured }: { confi
     setStarting(true)
     setError(undefined)
     try {
+      let activeSession = session
+      if (!activeSession?.isLoggedIn) {
+        activeSession = await connectPinterest()
+        if (!activeSession?.isLoggedIn) return
+      }
+
       const res = await fetch('/api/pinterest/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -139,7 +156,7 @@ export default function PinterestOnboarding({ configured: _configured }: { confi
             disabled={loggingIn || isRunning}
             className="rounded-full border border-neutral-300 bg-[#FAF7F2] px-5 py-2.5 text-xs font-semibold text-neutral-800 transition hover:border-[#831843] hover:text-[#831843] disabled:opacity-40"
           >
-            {loggingIn ? 'Window open…' : session?.isLoggedIn ? 'Re-open Login Session' : 'Open Pinterest Login Window'}
+            {loggingIn ? 'Complete login in the window…' : session?.isLoggedIn ? 'Reconnect' : 'Connect Pinterest'}
           </button>
         </div>
       </div>
@@ -149,7 +166,7 @@ export default function PinterestOnboarding({ configured: _configured }: { confi
         <span className="text-[10px] font-bold tracking-widest text-[#831843] uppercase">Step 02</span>
         <h3 className="mt-1 font-serif text-2xl font-bold text-neutral-900">Import Board</h3>
         <p className="mt-1 text-xs text-neutral-500">
-          Paste the direct link to the Pinterest board you want to sync.
+          Paste the direct link. PinPinWish will connect Pinterest if needed, import every Pin and use Google Lens automatically when metadata is insufficient.
         </p>
 
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -164,16 +181,18 @@ export default function PinterestOnboarding({ configured: _configured }: { confi
           <button
             type="button"
             onClick={() => void handleStartImport()}
-            disabled={starting || isRunning || !boardUrl.trim() || !session?.isLoggedIn}
+            disabled={starting || loggingIn || isRunning || !boardUrl.trim()}
             className="rounded-full bg-neutral-900 px-6 py-3 text-xs font-semibold tracking-wider text-white shadow-md transition hover:bg-[#831843] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {starting
-              ? 'Starting…'
+            {starting || loggingIn
+              ? session?.isLoggedIn
+                ? 'Starting…'
+                : 'Waiting for login…'
               : isRunning
               ? 'Importing…'
-              : !session?.isLoggedIn
-              ? 'Log in first'
-              : 'Start Import'}
+              : session?.isLoggedIn
+              ? 'Start Import'
+              : 'Connect & Import'}
           </button>
         </div>
 

@@ -20,7 +20,6 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as {
       boardUrl?: string
       boardId?: string
-      enableVisualSearch?: boolean
       wishlistId?: string
     }
 
@@ -39,7 +38,7 @@ export async function POST(request: NextRequest) {
 
     const job = await startImportJobAsync(boardUrl, {
       wishlistId: body.wishlistId,
-      enableVisualSearch: Boolean(body.enableVisualSearch),
+      enableVisualSearch: true,
     })
 
     return NextResponse.json({ ok: true, job }, { status: 201 })

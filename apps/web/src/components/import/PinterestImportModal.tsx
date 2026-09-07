@@ -17,7 +17,6 @@ interface SessionInfo {
 
 export default function PinterestImportModal({ isOpen, onClose, onImportComplete }: Props) {
   const [boardUrl, setBoardUrl] = useState('')
-  const [enableVisualSearch, setEnableVisualSearch] = useState(false)
   const [session, setSession] = useState<SessionInfo | null>(null)
   const [checkingSession, setCheckingSession] = useState(false)
   const [loggingIn, setLoggingIn] = useState(false)
@@ -83,27 +82,38 @@ export default function PinterestImportModal({ isOpen, onClose, onImportComplete
     return () => clearInterval(interval)
   }, [job, onImportComplete])
 
-  async function handleOpenLogin() {
+  async function connectPinterest(): Promise<SessionInfo | null> {
     setLoggingIn(true)
     setError(null)
     try {
       const res = await fetch('/api/pinterest/session', { method: 'POST' })
-      if (res.ok) {
-        const data = (await res.json()) as { session: SessionInfo }
-        setSession(data.session)
+      const data = (await res.json()) as {
+        session?: SessionInfo
+        result?: { message?: string }
+        error?: string
       }
+
+      if (!res.ok || !data.session?.isLoggedIn) {
+        throw new Error(
+          data.result?.message || data.error || 'Pinterest login could not be confirmed. Please try again.'
+        )
+      }
+
+      setSession(data.session)
+      return data.session
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not open login window')
+      return null
     } finally {
       setLoggingIn(false)
     }
   }
 
+  async function handleOpenLogin() {
+    await connectPinterest()
+  }
+
   async function handleStartImport() {
-    if (!session?.isLoggedIn) {
-      setError('Open Pinterest login once before starting the automatic import.')
-      return
-    }
     if (!boardUrl.trim()) {
       setError('Please paste a Pinterest board URL')
       return
@@ -112,13 +122,16 @@ export default function PinterestImportModal({ isOpen, onClose, onImportComplete
     setStarting(true)
     setError(null)
     try {
+      let activeSession = session
+      if (!activeSession?.isLoggedIn) {
+        activeSession = await connectPinterest()
+        if (!activeSession?.isLoggedIn) return
+      }
+
       const res = await fetch('/api/pinterest/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          boardUrl: boardUrl.trim(),
-          enableVisualSearch,
-        }),
+        body: JSON.stringify({ boardUrl: boardUrl.trim() }),
       })
 
       const data = (await res.json()) as { ok?: boolean; job?: ImportJobStats; error?: string }
@@ -225,7 +238,7 @@ export default function PinterestImportModal({ isOpen, onClose, onImportComplete
             disabled={loggingIn || isRunning}
             className="rounded-full border border-neutral-200 bg-white px-3 py-1 font-semibold text-neutral-700 transition hover:border-[#831843] hover:text-[#831843] disabled:opacity-40"
           >
-            {loggingIn ? 'Window open…' : 'Open Pinterest login'}
+            {loggingIn ? 'Complete login in the window…' : session?.isLoggedIn ? 'Reconnect' : 'Connect Pinterest'}
           </button>
         </div>
 
@@ -248,17 +261,9 @@ export default function PinterestImportModal({ isOpen, onClose, onImportComplete
               </div>
             </div>
 
-            <div className="flex items-center gap-2.5 pt-1">
-              <input
-                id="visualSearch"
-                type="checkbox"
-                checked={enableVisualSearch}
-                onChange={(e) => setEnableVisualSearch(e.target.checked)}
-                className="h-4 w-4 rounded-md border-neutral-300 text-[#831843] focus:ring-[#fbc6e0]"
-              />
-              <label htmlFor="visualSearch" className="text-xs text-neutral-600">
-                Enable Google Lens visual search fallback for unlinked pins
-              </label>
+            <div className="rounded-2xl border border-rose-100 bg-white/70 px-4 py-3 text-xs leading-relaxed text-neutral-600">
+              Product matching is automatic. When a Pin cannot be identified from its link or metadata,
+              its downloaded image is sent to Google Lens to look for reliable matches.
             </div>
 
             {error && (
@@ -278,14 +283,16 @@ export default function PinterestImportModal({ isOpen, onClose, onImportComplete
               <button
                 type="button"
                 onClick={() => void handleStartImport()}
-                disabled={starting || !boardUrl.trim() || !session?.isLoggedIn}
+                disabled={starting || loggingIn || !boardUrl.trim()}
                 className="rounded-full bg-neutral-900 px-6 py-2.5 text-xs font-semibold tracking-wider text-white shadow-md transition hover:bg-[#831843] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {starting
-                  ? 'Starting import…'
-                  : !session?.isLoggedIn
-                  ? 'Log in to Pinterest first'
-                  : 'Start Automatic Import'}
+                {starting || loggingIn
+                  ? session?.isLoggedIn
+                    ? 'Starting import…'
+                    : 'Waiting for Pinterest login…'
+                  : session?.isLoggedIn
+                  ? 'Start Automatic Import'
+                  : 'Connect & Import'}
               </button>
             </div>
           </div>
