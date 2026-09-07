@@ -37,6 +37,26 @@ export interface PinterestOAuthConfig {
   scopes: string[]
 }
 
+/** Server-only OAuth configuration. Never expose clientSecret to the browser. */
+export interface PinterestServerOAuthConfig extends PinterestOAuthConfig {
+  clientSecret: string
+}
+
+/** Plain token response used only transiently inside trusted server code. */
+export interface PinterestTokenResponse {
+  accessToken: string
+  refreshToken?: string
+  expiresIn: number
+  scopes: string[]
+  tokenType: string
+}
+
+export interface PinterestUserAccount {
+  username: string
+  accountType?: string
+  profileImage?: string
+}
+
 /**
  * PinterestConnection domain record, linked to a generic wishlist_sources entry via sourceId.
  */
@@ -57,10 +77,10 @@ export interface PinterestBoard {
   id: string
   name: string
   description?: string
-  url: string
+  url?: string
   pinCount: number
   imageUrl?: string
-  createdAt: Date
+  createdAt?: Date
 }
 
 // ─── Pinterest Pin Types ────────────────────────────────────────────────────
@@ -73,7 +93,7 @@ export interface PinterestPin {
   link?: string
   imageUrl?: string
   dominantColor?: string
-  createdAt: Date
+  createdAt?: Date
   savedAt?: Date
 }
 
@@ -124,4 +144,16 @@ export interface PinterestConnector {
     boardId: string,
     cursor?: PinterestSyncCursor
   ): Promise<PinterestSyncResult>
+}
+
+export interface PinterestPage<T> {
+  items: T[]
+  bookmark?: string
+}
+
+export interface OfficialPinterestClientOptions {
+  oauth: PinterestServerOAuthConfig
+  fetch?: typeof globalThis.fetch
+  apiBaseUrl?: string
+  authorizationUrl?: string
 }

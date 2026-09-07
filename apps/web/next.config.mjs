@@ -4,6 +4,7 @@ const nextConfig = {
     '@pinpinwish/shared',
     '@pinpinwish/wishlist-core',
     '@pinpinwish/price-tracker',
+    '@pinpinwish/pinterest-connector',
   ],
 }
 

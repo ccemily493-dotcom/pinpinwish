@@ -132,7 +132,7 @@ CREATE TABLE public.pinterest_boards (
   pinterest_board_id   TEXT NOT NULL,
   name                 TEXT NOT NULL,
   description          TEXT,
-  url                  TEXT NOT NULL,
+  url                  TEXT,
   image_url            TEXT,
   pin_count            INTEGER NOT NULL DEFAULT 0,
   is_syncing           BOOLEAN NOT NULL DEFAULT FALSE,

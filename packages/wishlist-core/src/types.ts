@@ -72,6 +72,11 @@ export interface WishlistItemRecord {
   sourceType?: SourceType
   /** The source's own identifier for this item */
   sourceItemId?: string
+  /** Original source URL when it is safe to expose to the UI. */
+  pinUrl?: string
+  resolutionStatus?: 'pending' | 'resolved' | 'needs_review'
+  confidence?: number
+  manualOverride?: boolean
   priority: Priority
   status: WishlistItemStatus
   desiredSize?: string
@@ -109,6 +114,10 @@ export interface WishlistItemView {
   sourceId?: string
   sourceType?: SourceType
   sourceItemId?: string
+  pinUrl?: string
+  resolutionStatus?: 'pending' | 'resolved' | 'needs_review'
+  confidence?: number
+  manualOverride?: boolean
   priority: Priority
   status: WishlistItemStatus
   desiredSize?: string

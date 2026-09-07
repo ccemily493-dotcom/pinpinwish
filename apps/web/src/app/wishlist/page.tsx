@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { MOCK_WISHLIST_ITEMS } from '@/data/mock-items'
+import Link from 'next/link'
 import { applyFilters, sortItems, calculateTotal, detectPossibleDuplicates } from '@pinpinwish/wishlist-core'
 import type { WishlistFilters, WishlistSort } from '@pinpinwish/wishlist-core'
 import type { Category, Priority, WishlistItemStatus } from '@pinpinwish/shared'
@@ -9,6 +9,8 @@ import { formatPrice } from '@pinpinwish/shared'
 import WishlistCard from '@/components/wishlist/WishlistCard'
 import WishlistFiltersBar from '@/components/wishlist/WishlistFiltersBar'
 import EmptyState from '@/components/wishlist/EmptyState'
+import AddWishlistItemForm from '@/components/wishlist/forms/AddWishlistItemForm'
+import { useWishlistData } from '@/hooks/useWishlistData'
 
 const CATEGORIES: { value: Category | 'all'; label: string }[] = [
   { value: 'all', label: 'ALL' },
@@ -29,6 +31,8 @@ const STATUS_TABS: { value: WishlistItemStatus | 'all'; label: string }[] = [
 const WISHLIST_CURRENCY = 'EUR' as const
 
 export default function WishlistPage() {
+  const { items, mode, error, updateItem, addItem, resetLocalDemo } = useWishlistData()
+  const [showAddForm, setShowAddForm] = useState(false)
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState<Category | 'all'>('all')
   const [priority, setPriority] = useState<Priority | 'all'>('all')
@@ -40,7 +44,7 @@ export default function WishlistPage() {
   const [onlyDuplicates, setOnlyDuplicates] = useState(false)
 
   // Apply duplicate detection to all items
-  const itemsWithDuplicates = useMemo(() => detectPossibleDuplicates(MOCK_WISHLIST_ITEMS), [])
+  const itemsWithDuplicates = useMemo(() => detectPossibleDuplicates(items), [items])
 
   const filteredItems = useMemo(() => {
     const filters: WishlistFilters = {
@@ -62,9 +66,8 @@ export default function WishlistPage() {
 
   return (
     <main className="min-h-screen bg-neutral-50">
-      {/* Demo banner */}
-      <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-center text-xs text-amber-700">
-        ⚠️ Demo mode — showing local mock data. No server persistence.
+      <div className={`${mode === 'cloud' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-amber-50 border-amber-200 text-amber-800'} border-b px-4 py-2 text-center text-xs`}>
+        {mode === 'loading' ? 'Loading your wishlist…' : mode === 'cloud' ? '✓ Synced securely with your account' : 'Local mode · changes are saved in this browser'}
       </div>
 
       {/* Header */}
@@ -81,7 +84,11 @@ export default function WishlistPage() {
                 <span>{formatPrice(total, WISHLIST_CURRENCY)} TOTAL</span>
               </div>
             </div>
-            {/* Search */}
+            <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
+              <Link href="/review" className="text-center text-sm font-semibold text-neutral-600 hover:text-pink-600">Needs Review</Link>
+              <Link href="/onboarding" className="rounded-full border border-neutral-300 px-4 py-2 text-center text-sm font-semibold hover:border-pink-300">Sync Pinterest</Link>
+              <button type="button" onClick={() => setShowAddForm(true)} className="rounded-full bg-neutral-900 px-4 py-2 text-sm font-semibold text-white">+ Add item</button>
+            </div>
             <div className="relative w-full sm:w-72">
               <label htmlFor="search" className="sr-only">Search wishlist</label>
               <input
@@ -140,6 +147,7 @@ export default function WishlistPage() {
 
       {/* Grid */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+        {error && <p role="alert" className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
         {filteredItems.length === 0 ? (
           <EmptyState />
         ) : (
@@ -149,11 +157,17 @@ export default function WishlistPage() {
             aria-label="Wishlist items"
           >
             {filteredItems.map((item) => (
-              <WishlistCard key={item.id} item={item} currency={WISHLIST_CURRENCY} />
+              <WishlistCard key={item.id} item={item} currency={WISHLIST_CURRENCY} onUpdate={(id, updates) => void updateItem(id, updates)} />
             ))}
           </div>
         )}
       </div>
+      {mode === 'local' && (
+        <div className="mx-auto max-w-7xl px-6 pb-10 text-right">
+          <button type="button" onClick={resetLocalDemo} className="text-xs text-neutral-400 underline underline-offset-4 hover:text-neutral-700">Reset local demo</button>
+        </div>
+      )}
+      {showAddForm && <AddWishlistItemForm onAdd={addItem} onClose={() => setShowAddForm(false)} />}
     </main>
   )
 }

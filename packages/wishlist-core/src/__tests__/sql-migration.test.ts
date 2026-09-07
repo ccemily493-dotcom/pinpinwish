@@ -4,6 +4,7 @@ import * as path from 'path'
 
 describe('SQL Migration Static Validation', () => {
   const sqlPath = path.resolve(__dirname, '../../../../supabase/migrations/001_foundation.sql')
+  const mvpSqlPath = path.resolve(__dirname, '../../../../supabase/migrations/002_mvp_auth_import.sql')
 
   it('migration file exists and is readable', () => {
     expect(fs.existsSync(sqlPath)).toBe(true)
@@ -87,5 +88,29 @@ describe('SQL Migration Static Validation', () => {
     for (const stmt of rlsStatements) {
       expect(content).toContain(stmt)
     }
+  })
+
+  it('adds resumable import jobs and a generation marker for deleted Pins', () => {
+    const content = fs.readFileSync(mvpSqlPath, 'utf-8')
+    expect(content).toContain('CREATE TABLE public.import_jobs')
+    expect(content).toContain('bookmark            TEXT')
+    expect(content).toContain('last_seen_import_job_id UUID')
+    expect(content).toContain('pinterest_pins_last_seen_job_fk')
+  })
+
+  it('stores conservative resolution state and protects manual choices', () => {
+    const content = fs.readFileSync(mvpSqlPath, 'utf-8')
+    expect(content).toContain("CREATE TYPE resolution_status AS ENUM ('pending', 'resolved', 'needs_review')")
+    expect(content).toContain("CREATE TYPE product_match_type AS ENUM ('exact', 'probable', 'similar', 'unresolved')")
+    expect(content).toContain('manual_override BOOLEAN NOT NULL DEFAULT FALSE')
+    expect(content).toContain('confidence NUMERIC(4, 3)')
+  })
+
+  it('bootstraps each authenticated user and keeps OAuth ciphertext server-only', () => {
+    const content = fs.readFileSync(mvpSqlPath, 'utf-8')
+    expect(content).toContain('CREATE OR REPLACE FUNCTION public.handle_new_user()')
+    expect(content).toContain('AFTER INSERT ON auth.users')
+    expect(content).toContain('Pinterest connections intentionally have no authenticated-client policy')
+    expect(content).not.toMatch(/CREATE POLICY pinterest_connections_/)
   })
 })

@@ -387,6 +387,14 @@ describe('detectPossibleDuplicates', () => {
     expect(b?.possibleDuplicateOf).toBeUndefined()
   })
 
+  it('does not flag unresolved Pins with no brand or offer evidence', () => {
+    const items = [
+      makeItem({ id: 'a', product: { id: 'p1', slug: 'a', name: 'Pinterest Pin pendiente', category: 'other', offers: [] } }),
+      makeItem({ id: 'b', product: { id: 'p2', slug: 'b', name: 'Pinterest Pin pendiente', category: 'other', offers: [] } }),
+    ]
+    expect(detectPossibleDuplicates(items)[1]?.possibleDuplicateOf).toBeUndefined()
+  })
+
   it('does not mutate input items', () => {
     const items = [
       makeItem({ id: 'a', product: { id: 'p1', slug: 'a', name: 'Blue Dress', brand: 'Zara', category: 'clothes', offers: [] } }),

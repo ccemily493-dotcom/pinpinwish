@@ -3,6 +3,7 @@ import type { WishlistItem } from '@pinpinwish/wishlist-core'
 import { getBestOffer } from '@pinpinwish/wishlist-core'
 import { formatPrice } from '@pinpinwish/shared'
 import type { Currency } from '@pinpinwish/shared'
+import type { Priority, WishlistItemStatus } from '@pinpinwish/shared'
 
 const PRIORITY_STYLES = {
   dream: 'bg-purple-100 text-purple-700',
@@ -21,9 +22,10 @@ const PRIORITY_LABELS = {
 type Props = {
   item: WishlistItem
   currency: Currency
+  onUpdate?: (id: string, updates: { priority?: Priority; status?: WishlistItemStatus }) => void
 }
 
-export default function WishlistCard({ item, currency }: Props) {
+export default function WishlistCard({ item, currency, onUpdate }: Props) {
   const bestOffer = getBestOffer(item.product.offers, currency)
   const isUnresolved = item.product.offers.length === 0
   const isPurchased = item.status === 'purchased'
@@ -117,6 +119,33 @@ export default function WishlistCard({ item, currency }: Props) {
             <span className="text-xs text-neutral-400">—</span>
           )}
         </div>
+        {onUpdate && (
+          <div className="mt-3 flex items-center gap-2 border-t border-neutral-100 pt-3">
+            <select
+              aria-label={`Priority for ${item.product.name}`}
+              value={item.priority}
+              onChange={(event) => onUpdate(item.id, { priority: event.target.value as Priority })}
+              className="min-w-0 flex-1 rounded-lg border border-neutral-200 bg-white px-2 py-1 text-xs capitalize"
+            >
+              {['low', 'medium', 'high', 'dream'].map((value) => <option key={value}>{value}</option>)}
+            </select>
+            <button
+              type="button"
+              onClick={() => onUpdate(item.id, { status: item.status === 'purchased' ? 'wanted' : 'purchased' })}
+              className="rounded-lg border border-neutral-200 px-2 py-1 text-xs font-medium hover:bg-neutral-50"
+            >
+              {item.status === 'purchased' ? 'Undo' : 'Bought'}
+            </button>
+            <button
+              type="button"
+              aria-label={`Remove ${item.product.name}`}
+              onClick={() => onUpdate(item.id, { status: item.status === 'removed' ? 'wanted' : 'removed' })}
+              className="rounded-lg border border-neutral-200 px-2 py-1 text-xs text-neutral-500 hover:bg-neutral-50"
+            >
+              {item.status === 'removed' ? 'Restore' : '×'}
+            </button>
+          </div>
+        )}
       </div>
     </article>
   )

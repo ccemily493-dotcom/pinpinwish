@@ -1,19 +1,22 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import type { WishlistItem } from '@pinpinwish/wishlist-core'
 import { getBestOffer } from '@pinpinwish/wishlist-core'
 import { formatPrice, formatDate } from '@pinpinwish/shared'
 import type { Currency } from '@pinpinwish/shared'
 import type { ProductOffer, PriceObservation } from '@pinpinwish/price-tracker'
+import type { Priority, WishlistItemStatus } from '@pinpinwish/shared'
 
 interface Props {
   item: WishlistItem
   currency: Currency
+  storageMode?: 'local' | 'cloud'
+  onUpdate?: (id: string, updates: { priority?: Priority; status?: WishlistItemStatus; desiredSize?: string; desiredColor?: string; notes?: string }) => Promise<void>
 }
 
-export default function ProductDetailView({ item, currency }: Props) {
+export default function ProductDetailView({ item, currency, storageMode = 'local', onUpdate }: Props) {
   const { product } = item
   const bestOffer = getBestOffer(product.offers, currency)
   const sortedOffers = [...product.offers].sort((a, b) => {
@@ -38,9 +41,8 @@ export default function ProductDetailView({ item, currency }: Props) {
 
   return (
     <main className="min-h-screen bg-neutral-50">
-      {/* Demo banner */}
-      <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-center text-xs text-amber-700">
-        ⚠️ Demo mode — showing local mock data. No server persistence.
+      <div className={`${storageMode === 'cloud' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-amber-50 border-amber-200 text-amber-800'} border-b px-4 py-2 text-center text-xs`}>
+        {storageMode === 'cloud' ? '✓ Synced securely with your account' : 'Local mode · saved in this browser'}
       </div>
 
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
@@ -142,10 +144,14 @@ export default function ProductDetailView({ item, currency }: Props) {
               </div>
             )}
 
+            {onUpdate && (
+              <WishlistPreferences item={item} onUpdate={onUpdate} />
+            )}
+
             {item.pinterestPinId && (
               <div className="text-xs text-neutral-400">
                 <span className="font-medium">Pinterest Pin:</span> {item.pinterestPinId}
-                <span className="ml-1 text-neutral-300">(mock source)</span>
+                {item.pinUrl && <a href={item.pinUrl} target="_blank" rel="noopener noreferrer" className="ml-2 font-semibold text-pink-600 underline underline-offset-4">View original Pin</a>}
               </div>
             )}
           </div>
@@ -224,14 +230,15 @@ export default function ProductDetailView({ item, currency }: Props) {
                           )}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <button
-                            disabled
-                            aria-label={`View ${item.product.name} at ${offer.store} (demo only)`}
-                            className="px-3 py-1 text-xs font-semibold border border-neutral-200 rounded-full text-neutral-400 cursor-not-allowed"
-                            title="Demo only — external links not active"
+                          <a
+                            href={offer.storeUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`View ${item.product.name} at ${offer.store}`}
+                            className="px-3 py-1 text-xs font-semibold border border-neutral-200 rounded-full text-neutral-700 hover:border-pink-300 hover:text-pink-600"
                           >
                             VIEW PRODUCT
-                          </button>
+                          </a>
                         </td>
                       </tr>
                     )
@@ -327,6 +334,39 @@ export default function ProductDetailView({ item, currency }: Props) {
         </section>
       </div>
     </main>
+  )
+}
+
+function WishlistPreferences({ item, onUpdate }: { item: WishlistItem; onUpdate: NonNullable<Props['onUpdate']> }) {
+  const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSaving(true)
+    setSaved(false)
+    const form = new FormData(event.currentTarget)
+    await onUpdate(item.id, {
+      priority: String(form.get('priority')) as Priority,
+      status: String(form.get('status')) as WishlistItemStatus,
+      desiredSize: String(form.get('desiredSize') ?? ''),
+      desiredColor: String(form.get('desiredColor') ?? ''),
+      notes: String(form.get('notes') ?? ''),
+    })
+    setSaving(false)
+    setSaved(true)
+  }
+  return (
+    <form onSubmit={(event) => void submit(event)} className="mt-2 rounded-2xl border border-neutral-200 bg-white p-4">
+      <p className="text-xs font-bold uppercase tracking-widest text-neutral-500">Wishlist preferences</p>
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <label className="text-xs text-neutral-500">Priority<select name="priority" defaultValue={item.priority} className="mt-1 w-full rounded-lg border border-neutral-200 bg-white px-2 py-2 text-sm capitalize">{['low', 'medium', 'high', 'dream'].map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label className="text-xs text-neutral-500">Status<select name="status" defaultValue={item.status} className="mt-1 w-full rounded-lg border border-neutral-200 bg-white px-2 py-2 text-sm capitalize">{['wanted', 'purchased', 'removed'].map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label className="text-xs text-neutral-500">Size<input name="desiredSize" defaultValue={item.desiredSize} className="mt-1 w-full rounded-lg border border-neutral-200 px-2 py-2 text-sm" /></label>
+        <label className="text-xs text-neutral-500">Color<input name="desiredColor" defaultValue={item.desiredColor} className="mt-1 w-full rounded-lg border border-neutral-200 px-2 py-2 text-sm" /></label>
+        <label className="col-span-2 text-xs text-neutral-500">Notes<textarea name="notes" defaultValue={item.notes} rows={2} className="mt-1 w-full rounded-lg border border-neutral-200 px-2 py-2 text-sm" /></label>
+      </div>
+      <div className="mt-3 flex items-center gap-3"><button disabled={saving} className="rounded-full bg-neutral-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">{saving ? 'Saving…' : 'Save preferences'}</button>{saved && <span className="text-xs font-medium text-green-600">Saved ✓</span>}</div>
+    </form>
   )
 }
 
