@@ -1,10 +1,38 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import type { Availability, Category, Currency, Priority, WishlistItemStatus } from '@pinpinwish/shared'
+import type {
+  Availability,
+  Category,
+  Currency,
+  Priority,
+  ProductMatchType,
+  ResolutionStatus,
+  SourceType,
+  WishlistItemStatus,
+} from '@pinpinwish/shared'
 import { slugify } from '@pinpinwish/shared'
 import type { WishlistItemView, Product } from '@pinpinwish/wishlist-core'
 import type { ProductOffer, PriceObservation } from '@pinpinwish/price-tracker'
 import { getDb } from './connection'
+
+type ResolutionWrite = {
+  status?: ResolutionStatus
+  matchType?: ProductMatchType
+  confidence?: number
+  manualOverride?: boolean
+  sourceType?: SourceType
+}
+
+function normalizeResolutionWrite(value?: ResolutionWrite) {
+  const status = value?.status ?? 'resolved'
+  return {
+    status,
+    matchType: value?.matchType ?? (status === 'resolved' ? 'exact' : 'unresolved'),
+    confidence: Math.max(0, Math.min(1, value?.confidence ?? (status === 'resolved' ? 1 : 0))),
+    manualOverride: value?.manualOverride ?? true,
+    sourceType: value?.sourceType ?? 'manual_url',
+  }
+}
 
 export function getDefaultWishlist(db = getDb()) {
   const row = db
@@ -594,6 +622,56 @@ export function saveResolvedProductAndItem(
   }
 }
 
+/**
+ * Removes obsolete automatically-generated items for one Pin before a fresh
+ * multi-product resolution. Manual choices always survive reprocessing.
+ */
+export function reconcileAutomaticItemsForPin(
+  params: {
+    wishlistId: string
+    pinRowId: string
+    keepSourceItemIds: string[]
+  },
+  db = getDb()
+): void {
+  const stale = db
+    .prepare(`
+      SELECT id, product_id, source_item_id
+      FROM wishlist_items
+      WHERE wishlist_id = ? AND pinterest_pin_id = ? AND manual_override = 0
+    `)
+    .all(params.wishlistId, params.pinRowId) as Array<{
+      id: string
+      product_id?: string | null
+      source_item_id?: string | null
+    }>
+
+  const keep = new Set(params.keepSourceItemIds)
+  const toRemove = stale.filter((item) => !item.source_item_id || !keep.has(item.source_item_id))
+  if (toRemove.length === 0) return
+
+  db.exec('SAVEPOINT reconcile_pin_items')
+  try {
+    for (const item of toRemove) {
+      db.prepare('DELETE FROM wishlist_items WHERE id = ?').run(item.id)
+    }
+
+    for (const item of toRemove) {
+      if (!item.product_id) continue
+      const stillUsed = db
+        .prepare('SELECT 1 FROM wishlist_items WHERE product_id = ? LIMIT 1')
+        .get(item.product_id)
+      if (!stillUsed) db.prepare('DELETE FROM products WHERE id = ?').run(item.product_id)
+    }
+
+    db.exec('RELEASE SAVEPOINT reconcile_pin_items')
+  } catch (error) {
+    db.exec('ROLLBACK TO SAVEPOINT reconcile_pin_items')
+    db.exec('RELEASE SAVEPOINT reconcile_pin_items')
+    throw error
+  }
+}
+
 export function getWishlistItems(wishlistId?: string, db = getDb()): WishlistItemView[] {
   let targetWishlistId = wishlistId
   if (!targetWishlistId) {
@@ -652,10 +730,40 @@ export function updateWishlistItem(
     desiredSize?: string
     desiredColor?: string
     notes?: string
+    name?: string
+    brand?: string
+    category?: Category
+    imageUrl?: string
+    localImagePath?: string
+    description?: string
+    price?: number
+    currency?: Currency
+    store?: string
+    storeUrl?: string
+    availability?: Availability
   },
   db = getDb()
 ) {
+  const current = getWishlistItemById(id, db)
+  if (!current) return null
+
   const now = new Date().toISOString()
+
+  const hasProductUpdates =
+    updates.name !== undefined ||
+    updates.brand !== undefined ||
+    updates.category !== undefined ||
+    updates.imageUrl !== undefined ||
+    updates.description !== undefined
+
+  const hasOfferUpdates =
+    updates.price !== undefined ||
+    updates.store !== undefined ||
+    updates.storeUrl !== undefined
+
+  const isManualProductEdit = hasProductUpdates || hasOfferUpdates
+
+  // 1. Update wishlist_items fields
   db.prepare(`
     UPDATE wishlist_items
     SET priority = COALESCE(?, priority),
@@ -663,6 +771,7 @@ export function updateWishlistItem(
         desired_size = CASE WHEN ? = 1 THEN ? ELSE desired_size END,
         desired_color = CASE WHEN ? = 1 THEN ? ELSE desired_color END,
         notes = CASE WHEN ? = 1 THEN ? ELSE notes END,
+        manual_override = CASE WHEN ? = 1 THEN 1 ELSE manual_override END,
         updated_at = ?
     WHERE id = ?
   `).run(
@@ -674,9 +783,122 @@ export function updateWishlistItem(
     updates.desiredColor !== undefined ? updates.desiredColor.trim() || null : null,
     updates.notes !== undefined ? 1 : 0,
     updates.notes !== undefined ? updates.notes.trim() || null : null,
+    isManualProductEdit ? 1 : 0,
     now,
     id
   )
+
+  if (hasProductUpdates || hasOfferUpdates) {
+    let productId = current.productId
+    const productName = updates.name !== undefined ? updates.name.trim() : current.product.name
+
+    if (!productId) {
+      productId = randomUUID()
+      const baseSlug = slugify(productName) || 'product'
+      const slug = `${baseSlug}-${productId.slice(0, 8)}`
+
+      db.prepare(`
+        INSERT INTO products (id, slug, name, brand, category, image_url, local_image_path, description, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        productId,
+        slug,
+        productName,
+        updates.brand !== undefined ? updates.brand.trim() || null : current.product.brand || null,
+        updates.category || current.product.category || 'other',
+        updates.imageUrl !== undefined ? updates.imageUrl.trim() || null : current.product.imageUrl || null,
+        updates.localImagePath || current.product.localImagePath || null,
+        updates.description !== undefined ? updates.description.trim() || null : current.product.description || null,
+        now,
+        now
+      )
+
+      db.prepare(`
+        UPDATE wishlist_items
+        SET product_id = ?, resolution_status = 'resolved', match_type = 'exact', confidence = 1, manual_override = 1, updated_at = ?
+        WHERE id = ?
+      `).run(productId, now, id)
+    } else {
+      db.prepare(`
+        UPDATE products
+        SET name = COALESCE(?, name),
+            brand = CASE WHEN ? = 1 THEN ? ELSE brand END,
+            category = COALESCE(?, category),
+            image_url = CASE WHEN ? = 1 THEN ? ELSE image_url END,
+            local_image_path = COALESCE(?, local_image_path),
+            description = CASE WHEN ? = 1 THEN ? ELSE description END,
+            updated_at = ?
+        WHERE id = ?
+      `).run(
+        updates.name !== undefined ? updates.name.trim() : null,
+        updates.brand !== undefined ? 1 : 0,
+        updates.brand !== undefined ? updates.brand.trim() || null : null,
+        updates.category || null,
+        updates.imageUrl !== undefined ? 1 : 0,
+        updates.imageUrl !== undefined ? updates.imageUrl.trim() || null : null,
+        updates.localImagePath || null,
+        updates.description !== undefined ? 1 : 0,
+        updates.description !== undefined ? updates.description.trim() || null : null,
+        now,
+        productId
+      )
+    }
+
+    // 3. Update or create offer & price observation if price or store is specified
+    if (hasOfferUpdates && updates.price !== undefined && Number.isFinite(updates.price)) {
+      const storeUrl = updates.storeUrl || current.product.offers[0]?.storeUrl || 'https://'
+      const storeName = updates.store || current.product.offers[0]?.store || 'Tienda'
+      const currency = updates.currency || current.product.offers[0]?.currency || 'EUR'
+      const availability = updates.availability || current.product.offers[0]?.availability || 'in_stock'
+
+      const existingOffer = db
+        .prepare('SELECT id FROM product_offers WHERE product_id = ? ORDER BY current_price ASC LIMIT 1')
+        .get(productId) as { id: string } | undefined
+
+      let offerId: string
+      if (existingOffer) {
+        offerId = existingOffer.id
+        db.prepare(`
+          UPDATE product_offers
+          SET store = ?, store_url = ?, current_price = ?, currency = ?, availability = ?, last_checked_at = ?, updated_at = ?
+          WHERE id = ?
+        `).run(
+          storeName,
+          storeUrl,
+          updates.price,
+          currency,
+          availability,
+          now,
+          now,
+          offerId
+        )
+      } else {
+        offerId = randomUUID()
+        db.prepare(`
+          INSERT INTO product_offers (
+            id, product_id, store, store_url, current_price, currency, availability,
+            last_checked_at, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          offerId,
+          productId,
+          storeName,
+          storeUrl,
+          updates.price,
+          currency,
+          availability,
+          now,
+          now,
+          now
+        )
+      }
+
+      db.prepare(`
+        INSERT INTO price_observations (id, product_offer_id, price, currency, availability, checked_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(randomUUID(), offerId, updates.price, currency, availability, now)
+    }
+  }
 
   return getWishlistItemById(id, db)
 }
@@ -784,6 +1006,243 @@ export function resolveWishlistItemManually(
   return getWishlistItemById(itemId, db)
 }
 
+export function resolveWishlistItemWithProductData(
+  itemId: string,
+  productData: {
+    name: string
+    brand?: string
+    category?: Category
+    imageUrl?: string
+    localImagePath?: string
+    description?: string
+    offers?: Array<{
+      store: string
+      storeUrl: string
+      currentPrice?: number
+      currency?: Currency
+      availability?: Availability
+    }>
+    resolution?: ResolutionWrite
+  },
+  db = getDb()
+) {
+  const item = getWishlistItemById(itemId, db)
+  if (!item) throw new Error('Item not found')
+
+  const now = new Date().toISOString()
+  const resolution = normalizeResolutionWrite(productData.resolution)
+  const productId = item.productId || randomUUID()
+  const baseSlug = slugify(productData.name) || 'product'
+  const slug = `${baseSlug}-${productId.slice(0, 8)}`
+
+  // Upsert product
+  const existingProduct = db.prepare('SELECT id FROM products WHERE id = ?').get(productId)
+  if (existingProduct) {
+    db.prepare(`
+      UPDATE products
+      SET name = ?, brand = ?, category = ?, image_url = ?, local_image_path = COALESCE(?, local_image_path), description = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      productData.name.trim(),
+      productData.brand?.trim() || null,
+      productData.category || 'other',
+      productData.imageUrl || null,
+      productData.localImagePath || null,
+      productData.description || null,
+      now,
+      productId
+    )
+  } else {
+    db.prepare(`
+      INSERT INTO products (id, slug, name, brand, category, image_url, local_image_path, description, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      productId,
+      slug,
+      productData.name.trim(),
+      productData.brand?.trim() || null,
+      productData.category || 'other',
+      productData.imageUrl || null,
+      productData.localImagePath || null,
+      productData.description || null,
+      now,
+      now
+    )
+  }
+
+  // Save offers and price observations
+  if (productData.offers && productData.offers.length > 0) {
+    for (const offer of productData.offers) {
+      const hasKnownPrice = offer.currentPrice !== undefined && Number.isFinite(offer.currentPrice)
+      const currentPrice = hasKnownPrice ? offer.currentPrice! : 0
+      let offerId: string
+      const existingOffer = db
+        .prepare('SELECT id FROM product_offers WHERE product_id = ? AND store_url = ?')
+        .get(productId, offer.storeUrl) as { id: string } | undefined
+
+      if (existingOffer) {
+        offerId = existingOffer.id
+        db.prepare(`
+          UPDATE product_offers
+          SET current_price = ?, currency = ?, availability = ?, last_checked_at = ?, updated_at = ?
+          WHERE id = ?
+        `).run(
+          currentPrice,
+          offer.currency || 'EUR',
+          offer.availability || 'unknown',
+          hasKnownPrice ? now : null,
+          now,
+          offerId
+        )
+      } else {
+        offerId = randomUUID()
+        db.prepare(`
+          INSERT INTO product_offers (
+            id, product_id, store, store_url, current_price, currency, availability,
+            last_checked_at, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          offerId,
+          productId,
+          offer.store,
+          offer.storeUrl,
+          currentPrice,
+          offer.currency || 'EUR',
+          offer.availability || 'unknown',
+          hasKnownPrice ? now : null,
+          now,
+          now
+        )
+      }
+
+      if (hasKnownPrice) {
+        db.prepare(`
+          INSERT INTO price_observations (id, product_offer_id, price, currency, availability, checked_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(randomUUID(), offerId, currentPrice, offer.currency || 'EUR', offer.availability || 'unknown', now)
+      }
+    }
+  }
+
+  // Update wishlist item
+  db.prepare(`
+    UPDATE wishlist_items
+    SET product_id = ?, resolution_status = ?, match_type = ?, confidence = ?, manual_override = ?, updated_at = ?
+    WHERE id = ?
+  `).run(
+    productId,
+    resolution.status,
+    resolution.matchType,
+    resolution.confidence,
+    resolution.manualOverride ? 1 : 0,
+    now,
+    itemId
+  )
+
+  return getWishlistItemById(itemId, db)
+}
+
+export function createManualWishlistItem(
+  params: {
+    wishlistId?: string
+    name: string
+    brand?: string
+    category?: Category
+    imageUrl?: string
+    localImagePath?: string
+    description?: string
+    priority?: Priority
+    offers?: Array<{
+      store: string
+      storeUrl: string
+      currentPrice?: number
+      currency?: Currency
+      availability?: Availability
+    }>
+    resolution?: ResolutionWrite
+  },
+  db = getDb()
+) {
+  const defaultWl = getDefaultWishlist(db)
+  const wishlistId = params.wishlistId || defaultWl.id
+  const now = new Date().toISOString()
+  const resolution = normalizeResolutionWrite(params.resolution)
+  const productId = randomUUID()
+  const baseSlug = slugify(params.name) || 'product'
+  const slug = `${baseSlug}-${productId.slice(0, 8)}`
+
+  db.prepare(`
+    INSERT INTO products (id, slug, name, brand, category, image_url, local_image_path, description, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    productId,
+    slug,
+    params.name.trim(),
+    params.brand?.trim() || null,
+    params.category || 'other',
+    params.imageUrl || null,
+    params.localImagePath || null,
+    params.description || null,
+    now,
+    now
+  )
+
+  if (params.offers && params.offers.length > 0) {
+    for (const offer of params.offers) {
+      const hasKnownPrice = offer.currentPrice !== undefined && Number.isFinite(offer.currentPrice)
+      const currentPrice = hasKnownPrice ? offer.currentPrice! : 0
+      const offerId = randomUUID()
+      db.prepare(`
+        INSERT INTO product_offers (
+          id, product_id, store, store_url, current_price, currency, availability,
+          last_checked_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        offerId,
+        productId,
+        offer.store,
+        offer.storeUrl,
+        currentPrice,
+        offer.currency || 'EUR',
+        offer.availability || 'unknown',
+        hasKnownPrice ? now : null,
+        now,
+        now
+      )
+
+      if (hasKnownPrice) {
+        db.prepare(`
+          INSERT INTO price_observations (id, product_offer_id, price, currency, availability, checked_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(randomUUID(), offerId, currentPrice, offer.currency || 'EUR', offer.availability || 'unknown', now)
+      }
+    }
+  }
+
+  const itemId = randomUUID()
+  db.prepare(`
+    INSERT INTO wishlist_items (
+      id, wishlist_id, product_id, source_type, priority, status,
+      resolution_status, match_type, confidence, manual_override, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, 'wanted', ?, ?, ?, ?, ?, ?)
+  `).run(
+    itemId,
+    wishlistId,
+    productId,
+    resolution.sourceType,
+    params.priority || 'medium',
+    resolution.status,
+    resolution.matchType,
+    resolution.confidence,
+    resolution.manualOverride ? 1 : 0,
+    now,
+    now
+  )
+
+  return getWishlistItemById(itemId, db)!
+}
+
+
 export function getProductBySlug(slug: string, db = getDb()): Product | null {
   const row = db.prepare('SELECT * FROM products WHERE slug = ?').get(slug) as Record<string, any> | undefined
   if (!row) return null
@@ -882,7 +1341,7 @@ function rowToWishlistItemView(row: Record<string, any>, db: DatabaseSync): Wish
     wishlistId: row.wishlist_id as string,
     productId: productId || undefined,
     product,
-    pinterestPinId: (row.source_item_id as string) || undefined,
+    pinterestPinId: (row.pinterest_pin_id as string) || (row.source_item_id as string) || undefined,
     sourceId: (row.source_id as string) || undefined,
     sourceType: (row.source_type as any) || 'pinterest',
     sourceItemId: (row.source_item_id as string) || undefined,
@@ -907,5 +1366,593 @@ function safeDomain(value: string) {
     return new URL(value).hostname.replace(/^www\./, '')
   } catch {
     return 'Tienda'
+  }
+}
+
+export interface PinGroupView {
+  id: string
+  pinterestPinId?: string
+  title: string
+  description?: string
+  imageUrl?: string
+  localImagePath?: string
+  pinUrl?: string
+  productsCount: number
+  totalPrice: number
+  currency: Currency
+  items: WishlistItemView[]
+  isArchived?: boolean
+}
+
+export function getWishlistPinsWithProducts(wishlistId?: string, db = getDb()): PinGroupView[] {
+  let targetWishlistId = wishlistId
+  if (!targetWishlistId) {
+    const defaultWl = getDefaultWishlist(db)
+    targetWishlistId = defaultWl.id
+  }
+
+  const allItems = getWishlistItems(targetWishlistId, db)
+
+  const pinRows = db
+    .prepare(`
+      SELECT pp.id, pp.pinterest_pin_id, pp.title, pp.description, pp.image_url, pp.local_image_path, pp.pin_url, pp.is_archived
+      FROM pinterest_pins pp
+    `)
+    .all() as Record<string, any>[]
+
+  const pinInfoMap = new Map<string, Record<string, any>>()
+  for (const p of pinRows) {
+    pinInfoMap.set(p.id, p)
+    if (p.pinterest_pin_id) pinInfoMap.set(p.pinterest_pin_id, p)
+  }
+
+  // Group items by pinterest_pin_id or standalone item id
+  const groupsMap = new Map<string, {
+    pinId: string
+    pinterestPinId?: string
+    title: string
+    description?: string
+    imageUrl?: string
+    localImagePath?: string
+    pinUrl?: string
+    items: WishlistItemView[]
+    pinArchived: boolean
+  }>()
+
+  for (const item of allItems) {
+    const groupKey = item.pinterestPinId || item.id
+    const pinInfo = item.pinterestPinId ? pinInfoMap.get(item.pinterestPinId) : undefined
+
+    let group = groupsMap.get(groupKey)
+    if (!group) {
+      group = {
+        pinId: groupKey,
+        pinterestPinId: item.pinterestPinId,
+        title: pinInfo?.title || item.product.name.replace(' (unidentified)', '').replace('Pin pendiente de identificar', '') || 'Look / Pin',
+        description: pinInfo?.description || item.product.description,
+        imageUrl: pinInfo?.image_url || item.product.imageUrl,
+        localImagePath: pinInfo?.local_image_path || item.product.localImagePath,
+        pinUrl: pinInfo?.pin_url || item.pinUrl,
+        items: [],
+        pinArchived: Boolean(pinInfo?.is_archived),
+      }
+      groupsMap.set(groupKey, group)
+    }
+
+    group.items.push(item)
+  }
+
+  // Ensure all pinterest_pins are included even if they currently have 0 items
+  for (const p of pinRows) {
+    const existing = groupsMap.get(p.id) || (p.pinterest_pin_id ? groupsMap.get(p.pinterest_pin_id) : undefined)
+    if (!existing) {
+      groupsMap.set(p.id, {
+        pinId: p.id,
+        pinterestPinId: p.pinterest_pin_id,
+        title: p.title || 'Look / Pin',
+        description: p.description,
+        imageUrl: p.image_url,
+        localImagePath: p.local_image_path,
+        pinUrl: p.pin_url,
+        items: [],
+        pinArchived: Boolean(p.is_archived),
+      })
+    }
+  }
+
+  // Convert map to array and calculate total prices
+  const result: PinGroupView[] = []
+  for (const group of groupsMap.values()) {
+    let totalPrice = 0
+    let validProductsCount = 0
+
+    for (const itm of group.items) {
+      if (itm.status !== 'removed') {
+        const bestOffer = itm.product.offers.find((o) => o.currentPrice > 0)
+        if (bestOffer && bestOffer.currentPrice > 0) {
+          totalPrice += bestOffer.currentPrice
+          validProductsCount++
+        } else if (itm.productId && itm.resolutionStatus === 'resolved') {
+          validProductsCount++
+        }
+      }
+    }
+
+    const isArchived =
+      group.pinArchived ||
+      (group.items.length > 0 &&
+        group.items.every((i) => i.status === 'archived' || i.status === 'removed'))
+
+    result.push({
+      id: group.pinId,
+      pinterestPinId: group.pinterestPinId,
+      title: group.title,
+      description: group.description,
+      imageUrl: group.imageUrl,
+      localImagePath: group.localImagePath,
+      pinUrl: group.pinUrl,
+      productsCount: group.items.length === 0 ? 0 : (validProductsCount || group.items.length),
+      totalPrice: Math.round(totalPrice * 100) / 100,
+      currency: 'EUR',
+      items: group.items,
+      isArchived,
+    })
+  }
+
+  return result
+}
+
+export function addProductToPin(
+  pinKey: string,
+  productData: {
+    name: string
+    brand?: string
+    category?: Category
+    imageUrl?: string
+    localImagePath?: string
+    description?: string
+    priority?: Priority
+    offers?: Array<{
+      store: string
+      storeUrl: string
+      currentPrice?: number
+      currency?: Currency
+      availability?: Availability
+    }>
+    resolution?: ResolutionWrite
+  },
+  db = getDb()
+) {
+  const defaultWl = getDefaultWishlist(db)
+  const now = new Date().toISOString()
+  const resolution = normalizeResolutionWrite({
+    sourceType: 'pinterest',
+    ...productData.resolution,
+  })
+
+  // Check if pinKey matches an existing pinterest_pins row or a wishlist_item
+  const existingPin = db.prepare('SELECT id, image_url, local_image_path FROM pinterest_pins WHERE id = ? OR pinterest_pin_id = ?').get(pinKey, pinKey) as { id: string; image_url?: string; local_image_path?: string } | undefined
+
+  let pinRowId: string | null = null
+
+  if (existingPin) {
+    pinRowId = existingPin.id
+  } else {
+    // Check if pinKey is a wishlist_item id
+    const existingItem = db.prepare('SELECT pinterest_pin_id, wishlist_id FROM wishlist_items WHERE id = ?').get(pinKey) as { pinterest_pin_id?: string; wishlist_id: string } | undefined
+    if (existingItem?.pinterest_pin_id) {
+      pinRowId = existingItem.pinterest_pin_id
+    }
+  }
+
+  // If there's an existing placeholder unresolved item on this pin with NO offers and NO product_id, resolve it directly
+  if (pinRowId) {
+    const placeholderItem = db.prepare(`
+      SELECT id FROM wishlist_items
+      WHERE pinterest_pin_id = ? AND product_id IS NULL AND resolution_status = 'needs_review'
+      LIMIT 1
+    `).get(pinRowId) as { id: string } | undefined
+
+    if (placeholderItem) {
+      return resolveWishlistItemWithProductData(placeholderItem.id, productData, db)
+    }
+  }
+
+  // Otherwise, create a new Product, Offers, and attach as a NEW wishlist_item
+  const productId = randomUUID()
+  const baseSlug = slugify(productData.name) || 'product'
+  const slug = `${baseSlug}-${productId.slice(0, 8)}`
+
+  db.prepare(`
+    INSERT INTO products (id, slug, name, brand, category, image_url, local_image_path, description, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    productId,
+    slug,
+    productData.name.trim(),
+    productData.brand?.trim() || null,
+    productData.category || 'other',
+    productData.imageUrl || null,
+    productData.localImagePath || null,
+    productData.description || null,
+    now,
+    now
+  )
+
+  if (productData.offers && productData.offers.length > 0) {
+    for (const offer of productData.offers) {
+      const hasKnownPrice = offer.currentPrice !== undefined && Number.isFinite(offer.currentPrice)
+      const currentPrice = hasKnownPrice ? offer.currentPrice! : 0
+      const offerId = randomUUID()
+      db.prepare(`
+        INSERT INTO product_offers (
+          id, product_id, store, store_url, current_price, currency, availability,
+          last_checked_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        offerId,
+        productId,
+        offer.store,
+        offer.storeUrl,
+        currentPrice,
+        offer.currency || 'EUR',
+        offer.availability || 'unknown',
+        hasKnownPrice ? now : null,
+        now,
+        now
+      )
+
+      if (hasKnownPrice) {
+        db.prepare(`
+          INSERT INTO price_observations (id, product_offer_id, price, currency, availability, checked_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(randomUUID(), offerId, currentPrice, offer.currency || 'EUR', offer.availability || 'unknown', now)
+      }
+    }
+  }
+
+  const newItemId = randomUUID()
+  db.prepare(`
+    INSERT INTO wishlist_items (
+      id, wishlist_id, product_id, pinterest_pin_id, source_type, priority, status,
+      resolution_status, match_type, confidence, manual_override, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'wanted', ?, ?, ?, ?, ?, ?)
+  `).run(
+    newItemId,
+    defaultWl.id,
+    productId,
+    pinRowId,
+    resolution.sourceType,
+    productData.priority || 'medium',
+    resolution.status,
+    resolution.matchType,
+    resolution.confidence,
+    resolution.manualOverride ? 1 : 0,
+    now,
+    now
+  )
+
+  return getWishlistItemById(newItemId, db)!
+}
+
+export function deleteWishlistItem(id: string, db = getDb()): boolean {
+  const item = getWishlistItemById(id, db)
+  if (!item) return false
+
+  db.exec('SAVEPOINT delete_wishlist_item')
+  try {
+    db.prepare('DELETE FROM wishlist_items WHERE id = ?').run(id)
+    if (item.productId) {
+      const otherUses = db.prepare('SELECT 1 FROM wishlist_items WHERE product_id = ? LIMIT 1').get(item.productId)
+      if (!otherUses) {
+        db.prepare('DELETE FROM products WHERE id = ?').run(item.productId)
+      }
+    }
+    db.exec('RELEASE SAVEPOINT delete_wishlist_item')
+    return true
+  } catch (error) {
+    db.exec('ROLLBACK TO SAVEPOINT delete_wishlist_item')
+    db.exec('RELEASE SAVEPOINT delete_wishlist_item')
+    throw error
+  }
+}
+
+export function archiveWishlistItem(id: string, db = getDb()): boolean {
+  const item = getWishlistItemById(id, db)
+  if (!item) return false
+
+  const now = new Date().toISOString()
+  db.prepare(`
+    UPDATE wishlist_items
+    SET status = 'archived', updated_at = ?
+    WHERE id = ?
+  `).run(now, id)
+  return true
+}
+
+export function restoreWishlistItem(id: string, db = getDb()): boolean {
+  const item = getWishlistItemById(id, db)
+  if (!item) return false
+
+  const now = new Date().toISOString()
+  db.prepare(`
+    UPDATE wishlist_items
+    SET status = 'wanted', updated_at = ?
+    WHERE id = ?
+  `).run(now, id)
+  return true
+}
+
+export function archiveWishlistPin(pinKey: string, db = getDb()): boolean {
+  const now = new Date().toISOString()
+  const pinResult = db.prepare(`
+    UPDATE pinterest_pins
+    SET is_archived = 1, updated_at = ?
+    WHERE id = ? OR pinterest_pin_id = ?
+  `).run(now, pinKey, pinKey)
+  const itemResult = db.prepare(`
+    UPDATE wishlist_items
+    SET status = 'archived', updated_at = ?
+    WHERE pinterest_pin_id = ?
+       OR pinterest_pin_id IN (SELECT id FROM pinterest_pins WHERE pinterest_pin_id = ? OR id = ?)
+       OR id = ?
+  `).run(now, pinKey, pinKey, pinKey, pinKey)
+  return pinResult.changes > 0 || itemResult.changes > 0
+}
+
+export function restoreWishlistPin(pinKey: string, db = getDb()): boolean {
+  const now = new Date().toISOString()
+  const pinResult = db.prepare(`
+    UPDATE pinterest_pins
+    SET is_archived = 0, updated_at = ?
+    WHERE id = ? OR pinterest_pin_id = ?
+  `).run(now, pinKey, pinKey)
+  const itemResult = db.prepare(`
+    UPDATE wishlist_items
+    SET status = 'wanted', updated_at = ?
+    WHERE pinterest_pin_id = ?
+       OR pinterest_pin_id IN (SELECT id FROM pinterest_pins WHERE pinterest_pin_id = ? OR id = ?)
+       OR id = ?
+  `).run(now, pinKey, pinKey, pinKey, pinKey)
+  return pinResult.changes > 0 || itemResult.changes > 0
+}
+
+export function deleteWishlistPin(pinKey: string, db = getDb()): boolean {
+  db.exec('SAVEPOINT delete_wishlist_pin')
+  try {
+    // 1. Find all items belonging to this pin
+    const items = db.prepare(`
+      SELECT id, product_id
+      FROM wishlist_items
+      WHERE pinterest_pin_id = ?
+         OR pinterest_pin_id IN (SELECT id FROM pinterest_pins WHERE pinterest_pin_id = ? OR id = ?)
+         OR id = ?
+    `).all(pinKey, pinKey, pinKey, pinKey) as Array<{ id: string; product_id?: string | null }>
+
+    // 2. Delete all items
+    for (const item of items) {
+      db.prepare('DELETE FROM wishlist_items WHERE id = ?').run(item.id)
+      if (item.product_id) {
+        const otherUses = db.prepare('SELECT 1 FROM wishlist_items WHERE product_id = ? LIMIT 1').get(item.product_id)
+        if (!otherUses) {
+          db.prepare('DELETE FROM products WHERE id = ?').run(item.product_id)
+        }
+      }
+    }
+
+    // 3. Delete from pinterest_pins
+    db.prepare('DELETE FROM pinterest_pins WHERE id = ? OR pinterest_pin_id = ?').run(pinKey, pinKey)
+
+    db.exec('RELEASE SAVEPOINT delete_wishlist_pin')
+    return true
+  } catch (error) {
+    db.exec('ROLLBACK TO SAVEPOINT delete_wishlist_pin')
+    db.exec('RELEASE SAVEPOINT delete_wishlist_pin')
+    throw error
+  }
+}
+
+export function deduplicateWishlist(
+  wishlistId?: string,
+  db = getDb()
+): {
+  removedCount: number
+  mergedCount: number
+  removedItemIds: string[]
+} {
+  const defaultWl = getDefaultWishlist(db)
+  const targetWishlistId = wishlistId || defaultWl.id
+  const now = new Date().toISOString()
+
+  db.exec('SAVEPOINT deduplicate_wishlist')
+  try {
+    const allItems = getWishlistItems(targetWishlistId, db)
+    const removedItemIds: string[] = []
+    let mergedCount = 0
+
+    // 1. Group items by duplicate criteria
+    const groups: WishlistItemView[][] = []
+    const visited = new Set<string>()
+
+    for (let i = 0; i < allItems.length; i++) {
+      const a = allItems[i]
+      if (!a || visited.has(a.id) || a.status === 'removed') continue
+
+      const currentGroup: WishlistItemView[] = [a]
+      visited.add(a.id)
+
+      for (let j = i + 1; j < allItems.length; j++) {
+        const b = allItems[j]
+        if (!b || visited.has(b.id) || b.status === 'removed') continue
+
+        let isDup = false
+
+        if (a.productId && b.productId && a.productId === b.productId) {
+          isDup = true
+        } else if (
+          a.product.name &&
+          b.product.name &&
+          !a.product.name.includes('pendiente') &&
+          !b.product.name.includes('pendiente')
+        ) {
+          const normNameA = a.product.name.trim().toLowerCase().replace(/\s+/g, ' ')
+          const normNameB = b.product.name.trim().toLowerCase().replace(/\s+/g, ' ')
+          const normBrandA = (a.product.brand || '').trim().toLowerCase()
+          const normBrandB = (b.product.brand || '').trim().toLowerCase()
+
+          if (normNameA === normNameB) {
+            if (normBrandA && normBrandB) {
+              isDup = normBrandA === normBrandB
+            } else {
+              isDup = true
+            }
+          }
+        } else if (
+          !a.productId &&
+          !b.productId &&
+          a.pinterestPinId &&
+          b.pinterestPinId &&
+          a.pinterestPinId === b.pinterestPinId
+        ) {
+          // Two unresolved placeholders on the same pin
+          isDup = true
+        }
+
+        if (isDup) {
+          currentGroup.push(b)
+          visited.add(b.id)
+        }
+      }
+
+      if (currentGroup.length > 1) {
+        groups.push(currentGroup)
+      }
+    }
+
+    // 2. Process duplicate groups
+    for (const group of groups) {
+      mergedCount++
+      // Sort to find the canonical item:
+      // manual override > wanted > has offers > resolved > oldest
+      group.sort((x, y) => {
+        if (x.manualOverride !== y.manualOverride) return x.manualOverride ? -1 : 1
+        if (x.status !== y.status) {
+          if (x.status === 'wanted') return -1
+          if (y.status === 'wanted') return 1
+        }
+        const xOffers = x.product.offers.length
+        const yOffers = y.product.offers.length
+        if (xOffers !== yOffers) return yOffers - xOffers
+        if (x.productId && !y.productId) return -1
+        if (!x.productId && y.productId) return 1
+        return x.createdAt.getTime() - y.createdAt.getTime()
+      })
+
+      const canonical = group[0]
+      const duplicates = group.slice(1)
+
+      // Merge offers from duplicates into canonical's product
+      if (canonical.productId) {
+        for (const dup of duplicates) {
+          if (dup.productId && dup.productId !== canonical.productId) {
+            const dupOffers = db
+              .prepare('SELECT * FROM product_offers WHERE product_id = ?')
+              .all(dup.productId) as Record<string, any>[]
+
+            for (const offer of dupOffers) {
+              const exists = db
+                .prepare('SELECT 1 FROM product_offers WHERE product_id = ? AND store_url = ? LIMIT 1')
+                .get(canonical.productId, offer.store_url)
+              if (!exists) {
+                db.prepare('UPDATE product_offers SET product_id = ?, updated_at = ? WHERE id = ?').run(
+                  canonical.productId,
+                  now,
+                  offer.id
+                )
+              }
+            }
+          }
+        }
+      }
+
+      // Delete the duplicate wishlist_items
+      for (const dup of duplicates) {
+        db.prepare('DELETE FROM wishlist_items WHERE id = ?').run(dup.id)
+        removedItemIds.push(dup.id)
+
+        // If duplicate has an orphan product_id, delete it
+        if (dup.productId && dup.productId !== canonical.productId) {
+          const inUse = db.prepare('SELECT 1 FROM wishlist_items WHERE product_id = ? LIMIT 1').get(dup.productId)
+          if (!inUse) {
+            db.prepare('DELETE FROM products WHERE id = ?').run(dup.productId)
+          }
+        }
+      }
+    }
+
+    // 3. Clean duplicate offers on the same product
+    const allProducts = db.prepare('SELECT id FROM products').all() as Array<{ id: string }>
+    for (const prod of allProducts) {
+      const offers = db
+        .prepare('SELECT id, store_url FROM product_offers WHERE product_id = ? ORDER BY created_at ASC')
+        .all(prod.id) as Array<{ id: string; store_url: string }>
+      const seenUrls = new Set<string>()
+      for (const off of offers) {
+        if (seenUrls.has(off.store_url)) {
+          db.prepare('DELETE FROM product_offers WHERE id = ?').run(off.id)
+        } else {
+          seenUrls.add(off.store_url)
+        }
+      }
+    }
+
+    // 4. Clean orphan products
+    db.prepare(`
+      DELETE FROM products
+      WHERE id NOT IN (SELECT DISTINCT product_id FROM wishlist_items WHERE product_id IS NOT NULL)
+    `).run()
+
+    db.exec('RELEASE SAVEPOINT deduplicate_wishlist')
+    return {
+      removedCount: removedItemIds.length,
+      mergedCount,
+      removedItemIds,
+    }
+  } catch (error) {
+    db.exec('ROLLBACK TO SAVEPOINT deduplicate_wishlist')
+    db.exec('RELEASE SAVEPOINT deduplicate_wishlist')
+    throw error
+  }
+}
+
+export function clearAllProducts(db = getDb()): {
+  clearedItemsCount: number
+  clearedProductsCount: number
+  clearedOffersCount: number
+} {
+  db.exec('SAVEPOINT clear_all_products')
+  try {
+    const itemsCount = (db.prepare('SELECT count(*) as c FROM wishlist_items').get() as { c: number })?.c || 0
+    const productsCount = (db.prepare('SELECT count(*) as c FROM products').get() as { c: number })?.c || 0
+    const offersCount = (db.prepare('SELECT count(*) as c FROM product_offers').get() as { c: number })?.c || 0
+
+    // Remove all wishlist items and products
+    db.prepare('DELETE FROM wishlist_items').run()
+    db.prepare('DELETE FROM price_observations').run()
+    db.prepare('DELETE FROM product_offers').run()
+    db.prepare('DELETE FROM product_images').run()
+    db.prepare('DELETE FROM products').run()
+    db.prepare('DELETE FROM import_job_items').run()
+
+    db.exec('RELEASE SAVEPOINT clear_all_products')
+    return {
+      clearedItemsCount: itemsCount,
+      clearedProductsCount: productsCount,
+      clearedOffersCount: offersCount,
+    }
+  } catch (error) {
+    db.exec('ROLLBACK TO SAVEPOINT clear_all_products')
+    db.exec('RELEASE SAVEPOINT clear_all_products')
+    throw error
   }
 }

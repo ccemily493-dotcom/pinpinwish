@@ -36,6 +36,12 @@ export function getDb(customPath?: string): DatabaseSync {
 export function initDatabase(db: DatabaseSync): void {
   db.exec(SCHEMA_SQL)
 
+  // Keep existing local databases compatible with additive schema changes.
+  const pinColumns = db.prepare('PRAGMA table_info(pinterest_pins)').all() as Array<{ name: string }>
+  if (!pinColumns.some((column) => column.name === 'is_archived')) {
+    db.exec('ALTER TABLE pinterest_pins ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0')
+  }
+
   // Seed default user and wishlist if not present
   const existingUser = db.prepare('SELECT id FROM profiles WHERE id = ?').get('local-user')
   if (!existingUser) {

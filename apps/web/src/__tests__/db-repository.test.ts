@@ -15,6 +15,7 @@ import {
   getWishlistItemById,
   updateWishlistItem,
   resolveWishlistItemManually,
+  reconcileAutomaticItemsForPin,
 } from '../lib/db/repository'
 
 describe('SQLite Database & Repository Layer', () => {
@@ -105,6 +106,74 @@ describe('SQLite Database & Repository Layer', () => {
   })
 
   describe('Idempotent Product & WishlistItem Resolution', () => {
+    it('reconciles multiple automatic products from one Pin without deleting manual choices', () => {
+      const wishlist = getDefaultWishlist(db)
+      const boardId = upsertPinterestBoard(
+        {
+          userId: 'local-user',
+          boardUrl: 'https://pinterest.com/user/multi-product/',
+          pinterestBoardId: 'user/multi-product',
+          name: 'Multi product',
+          pinCount: 1,
+        },
+        db
+      )
+      const pinRowId = upsertPinterestPin(
+        { boardId, userId: 'local-user', pinterestPinId: 'multi-pin' },
+        db
+      )
+
+      const keepId = saveResolvedProductAndItem(
+        {
+          wishlistId: wishlist.id,
+          sourceId: 'source-pinterest-default',
+          sourceItemId: 'multi-pin:product:primer',
+          pinRowId,
+          resolutionStatus: 'resolved',
+          product: { name: 'Face Primer' },
+        },
+        db
+      )
+      saveResolvedProductAndItem(
+        {
+          wishlistId: wishlist.id,
+          sourceId: 'source-pinterest-default',
+          sourceItemId: 'multi-pin:product:obsolete',
+          pinRowId,
+          resolutionStatus: 'resolved',
+          product: { name: 'Obsolete Match' },
+        },
+        db
+      )
+      const manualId = saveResolvedProductAndItem(
+        {
+          wishlistId: wishlist.id,
+          sourceId: 'source-pinterest-default',
+          sourceItemId: 'multi-pin:manual',
+          pinRowId,
+          resolutionStatus: 'needs_review',
+        },
+        db
+      )
+      resolveWishlistItemManually(manualId, { name: 'My manual product', category: 'other' }, db)
+
+      reconcileAutomaticItemsForPin(
+        { wishlistId: wishlist.id, pinRowId, keepSourceItemIds: ['multi-pin:product:primer'] },
+        db
+      )
+
+      const rows = db
+        .prepare('SELECT id, source_item_id FROM wishlist_items WHERE pinterest_pin_id = ? ORDER BY source_item_id')
+        .all(pinRowId) as Array<{ id: string; source_item_id: string }>
+      expect(rows).toEqual([
+        { id: manualId, source_item_id: 'multi-pin:manual' },
+        { id: keepId, source_item_id: 'multi-pin:product:primer' },
+      ])
+      expect(
+        Number((db.prepare('SELECT COUNT(*) AS count FROM products WHERE name = ?').get('Obsolete Match') as { count: number }).count)
+      ).toBe(0)
+    })
+
     it('saves resolved product, offer, and wishlist item idempotently', () => {
       const wishlist = getDefaultWishlist(db)
 
@@ -382,6 +451,62 @@ describe('SQLite Database & Repository Layer', () => {
       expect(resolved?.product.category).toBe('shoes')
       expect(resolved?.product.offers[0]?.currentPrice).toBe(650)
       expect(resolved?.manualOverride).toBe(true)
+    })
+  })
+
+  describe('Edit WishlistItem & Product Details', () => {
+    it('allows editing product details, prices, notes, and priority', () => {
+      const wishlist = getDefaultWishlist(db)
+      const itemId = saveResolvedProductAndItem(
+        {
+          wishlistId: wishlist.id,
+          sourceId: 'source-pinterest-default',
+          sourceItemId: 'pin-edit-test',
+          resolutionStatus: 'resolved',
+          product: {
+            name: 'Original Dress',
+            brand: 'Old Brand',
+            category: 'clothes',
+            offers: [
+              {
+                store: 'Old Store',
+                storeUrl: 'https://old.com/dress',
+                currentPrice: 30,
+              },
+            ],
+          },
+        },
+        db
+      )
+
+      const edited = updateWishlistItem(
+        itemId,
+        {
+          name: 'Silk Slip Dress - Emerald Green',
+          brand: 'Reformation',
+          category: 'clothes',
+          price: 198.5,
+          store: 'Reformation',
+          storeUrl: 'https://thereformation.com/dress',
+          priority: 'dream',
+          desiredSize: 'S',
+          desiredColor: 'Emerald Green',
+          notes: 'Esperar a rebajas de verano',
+        },
+        db
+      )
+
+      expect(edited).not.toBeNull()
+      expect(edited?.product.name).toBe('Silk Slip Dress - Emerald Green')
+      expect(edited?.product.brand).toBe('Reformation')
+      expect(edited?.priority).toBe('dream')
+      expect(edited?.desiredSize).toBe('S')
+      expect(edited?.desiredColor).toBe('Emerald Green')
+      expect(edited?.notes).toBe('Esperar a rebajas de verano')
+      expect(edited?.product.offers.length).toBe(1)
+      expect(edited?.product.offers[0].store).toBe('Reformation')
+      expect(edited?.product.offers[0].currentPrice).toBe(198.5)
+      expect(edited?.manualOverride).toBe(true)
     })
   })
 })

@@ -2,6 +2,7 @@ import type { PinterestPinInput, ProductMatch, ProductResolver, ProductResolverO
 import { fetchExternalHtml } from './link-fetcher'
 import { parseHtmlMetadata } from './html-parser'
 import { calculateConfidence } from './confidence-scorer'
+import { clusterVisualSearchResults } from './visual-clusterer'
 
 /**
  * NullProductResolver — Conservative fallback implementation.
@@ -52,6 +53,79 @@ export class StandardProductResolver implements ProductResolver {
   }
 
   async resolve(pin: PinterestPinInput, signal?: AbortSignal): Promise<ProductMatch> {
+    const matches = await this.resolveAll(pin, signal)
+    return matches[0] || this.unresolvedResult(pin, 'No supported product match was found')
+  }
+
+  async resolveAll(pin: PinterestPinInput, signal?: AbortSignal): Promise<ProductMatch[]> {
+    if (signal?.aborted) return [this.unresolvedResult(pin, 'Operation aborted')]
+
+    // Google Lens is the primary discovery source for Pinterest imagery because
+    // one Pin can depict several independent products and may have no link.
+    if (this.visualSearchProvider && (pin.localImagePath || pin.imageUrl)) {
+      try {
+        const visualResults = await this.visualSearchProvider.search({
+          localImagePath: pin.localImagePath,
+          imageUrl: pin.imageUrl,
+          title: pin.title,
+          description: pin.description,
+          signal,
+        })
+        const clusters = clusterVisualSearchResults(visualResults)
+
+        if (clusters.length > 0) {
+          return clusters.map((cluster) => {
+            const primary = cluster.results[0]!
+            const offers = cluster.results.map((result) => ({
+              store: result.store,
+              storeUrl: result.productUrl,
+              price: result.price,
+              currency: result.currency,
+              availability: result.availability,
+            }))
+            const matchType =
+              cluster.confidence >= 0.9
+                ? 'exact'
+                : cluster.confidence >= 0.72
+                  ? 'probable'
+                  : cluster.confidence >= 0.5
+                    ? 'similar'
+                    : 'unresolved'
+
+            return {
+              name: cluster.name,
+              category: inferCategory(cluster.name),
+              imageUrl: cluster.imageUrl || pin.imageUrl,
+              localImagePath: pin.localImagePath,
+              productUrl: primary.productUrl,
+              store: primary.store,
+              price: primary.price,
+              currency: primary.currency,
+              availability: primary.availability,
+              offers,
+              confidence: cluster.confidence,
+              matchType,
+              evidence: {
+                strategyUsed: this.visualSearchProvider!.providerId,
+                visualMatchFound: true,
+                details: `${cluster.results.length} Lens result(s) support this distinct product`,
+              },
+            } satisfies ProductMatch
+          })
+        }
+      } catch (err) {
+        console.warn(`[resolver] Visual search failed for pin ${pin.pinterestPinId}:`, err)
+      }
+    }
+
+    return [await this.resolveSingle(pin, signal, true)]
+  }
+
+  private async resolveSingle(
+    pin: PinterestPinInput,
+    signal?: AbortSignal,
+    skipVisualSearch = false
+  ): Promise<ProductMatch> {
     if (signal?.aborted) {
       return this.unresolvedResult(pin, 'Operation aborted')
     }
@@ -96,7 +170,7 @@ export class StandardProductResolver implements ProductResolver {
     }
 
     // ── Stage 2: Visual Search Resolution ──
-    if (this.visualSearchProvider && (pin.localImagePath || pin.imageUrl)) {
+    if (!skipVisualSearch && this.visualSearchProvider && (pin.localImagePath || pin.imageUrl)) {
       try {
         const visualResults = await this.visualSearchProvider.search({
           localImagePath: pin.localImagePath,
@@ -175,6 +249,15 @@ export class StandardProductResolver implements ProductResolver {
       },
     }
   }
+}
+
+function inferCategory(name: string): import('@pinpinwish/shared').Category {
+  const normalized = name.toLowerCase()
+  if (/shoe|sneaker|trainer|boot|heel|sandal|loafer|ballet flat/.test(normalized)) return 'shoes'
+  if (/dress|shirt|skirt|jacket|coat|jean|trouser|pant|cardigan|sweater|top|blouse/.test(normalized)) return 'clothes'
+  if (/perfume|fragrance|lotion|cream|makeup|lip|mascara|concealer|primer|serum|shampoo|beauty/.test(normalized)) return 'beauty'
+  if (/lamp|chair|table|sofa|vase|candle|bedding|decor|home/.test(normalized)) return 'home'
+  return 'other'
 }
 
 function isLikelyProductLink(link: string): boolean {

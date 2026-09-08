@@ -1,12 +1,14 @@
 import { isPinterestUrl, parsePinterestBoardUrl } from '@pinpinwish/shared'
 import { PinterestBoardScraper } from '@pinpinwish/pinterest-connector'
 import { StandardProductResolver } from '@pinpinwish/product-resolver'
-import { GoogleLensPlaywrightProvider } from '@pinpinwish/product-search'
+import { SerpApiGoogleLensProvider } from '@pinpinwish/product-search'
+import { createHash } from 'node:crypto'
 import {
   createImportJob,
   getActiveImportJobForBoard,
   getDefaultWishlist,
   getImportJob,
+  reconcileAutomaticItemsForPin,
   saveResolvedProductAndItem,
   updateImportJob,
   upsertImportJobItem,
@@ -154,7 +156,7 @@ async function runBackgroundImport(
       downloadedCount: scrapedBoard.pins.filter((p) => p.localImagePath).length,
     })
 
-    const visualProvider = enableVisualSearch ? new GoogleLensPlaywrightProvider() : undefined
+    const visualProvider = enableVisualSearch ? new SerpApiGoogleLensProvider() : undefined
     const resolver = new StandardProductResolver({
       visualSearchProvider: visualProvider,
       fetchTimeoutMs: 8000,
@@ -198,7 +200,7 @@ async function runBackgroundImport(
         })
 
         // Resolve product
-        const match = await resolver.resolve(
+        const matches = await resolver.resolveAll(
           {
             pinterestPinId: pin.pinterestPinId,
             title: pin.title,
@@ -211,58 +213,78 @@ async function runBackgroundImport(
           signal
         )
 
-        const isResolved = match.matchType !== 'unresolved' && match.confidence >= 0.5
+        const sourceItemIds = matches.map((match) => productSourceItemId(pin.pinterestPinId, match))
+        reconcileAutomaticItemsForPin({ wishlistId, pinRowId, keepSourceItemIds: sourceItemIds })
 
-        if (isResolved) {
-          identifiedCount++
-        } else {
-          needsReviewCount++
+        let resolvedProductsForPin = 0
+        let unresolvedProductsForPin = 0
+
+        for (const match of matches) {
+          const isResolved = match.matchType !== 'unresolved' && match.confidence >= 0.72
+          if (isResolved) resolvedProductsForPin++
+          else unresolvedProductsForPin++
+
+          const matchOffers = match.offers?.length
+            ? match.offers
+            : match.productUrl
+              ? [
+                  {
+                    store: match.store || 'Store',
+                    storeUrl: match.productUrl,
+                    price: match.price,
+                    currency: match.currency,
+                    availability: match.availability,
+                    variant: match.variant,
+                  },
+                ]
+              : []
+
+          saveResolvedProductAndItem({
+            wishlistId,
+            sourceId,
+            sourceItemId: productSourceItemId(pin.pinterestPinId, match),
+            pinterestPinId: pin.pinterestPinId,
+            pinRowId,
+            pinUrl: `https://www.pinterest.com/pin/${pin.pinterestPinId}/`,
+            imageHash: pin.imageHash,
+            priority: 'medium',
+            status: 'wanted',
+            resolutionStatus: isResolved ? 'resolved' : 'needs_review',
+            matchType: match.matchType,
+            confidence: match.confidence,
+            product: isResolved
+              ? {
+                  name: match.name,
+                  brand: match.brand,
+                  category: match.category,
+                  imageUrl: match.imageUrl || pin.imageUrl,
+                  localImagePath: pin.localImagePath,
+                  description: match.evidence?.details,
+                  images: match.images,
+                  offers: matchOffers.map((offer) => ({
+                    store: offer.store,
+                    storeUrl: offer.storeUrl,
+                    currentPrice: offer.price,
+                    currency: offer.currency || 'EUR',
+                    availability: offer.availability || 'unknown',
+                    variant: offer.variant,
+                  })),
+                }
+              : undefined,
+          })
         }
 
-        saveResolvedProductAndItem({
-          wishlistId,
-          sourceId,
-          sourceItemId: pin.pinterestPinId,
-          pinterestPinId: pin.pinterestPinId,
-          pinRowId,
-          pinUrl: `https://www.pinterest.com/pin/${pin.pinterestPinId}/`,
-          imageHash: pin.imageHash,
-          priority: 'medium',
-          status: 'wanted',
-          resolutionStatus: isResolved ? 'resolved' : 'needs_review',
-          matchType: match.matchType,
-          confidence: match.confidence,
-          product: isResolved
-            ? {
-                name: match.name,
-                brand: match.brand,
-                category: match.category,
-                imageUrl: match.imageUrl || pin.imageUrl,
-                localImagePath: pin.localImagePath,
-                description: match.evidence?.details,
-                images: match.images,
-                offers: match.productUrl && match.price !== undefined
-                  ? [
-                      {
-                        store: match.store || 'Store',
-                        storeUrl: match.productUrl,
-                        currentPrice: match.price,
-                        currency: match.currency || 'EUR',
-                        availability: match.availability || 'unknown',
-                        variant: match.variant,
-                      },
-                    ]
-                  : [],
-              }
-            : undefined,
-        })
+        identifiedCount += resolvedProductsForPin
+        needsReviewCount += unresolvedProductsForPin
+        const isResolved = resolvedProductsForPin > 0 && unresolvedProductsForPin === 0
+        const bestMatch = matches[0]!
 
         upsertImportJobItem({
           jobId,
           pinId: pin.pinterestPinId,
           status: isResolved ? 'identified' : 'unresolved',
-          confidence: match.confidence,
-          matchType: match.matchType,
+          confidence: bestMatch.confidence,
+          matchType: bestMatch.matchType,
         })
       } catch (pinErr) {
         console.warn(`[import-worker] Error processing pin ${pin.pinterestPinId}:`, pinErr)
@@ -300,4 +322,19 @@ async function runBackgroundImport(
   } finally {
     activeJobControllers.delete(jobId)
   }
+}
+
+export function productSourceItemId(
+  pinterestPinId: string,
+  match: { name: string; brand?: string; matchType: string }
+): string {
+  if (match.matchType === 'unresolved') return pinterestPinId
+  const identity = `${match.brand || ''}|${match.name}`
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+  const hash = createHash('sha256').update(identity).digest('hex').slice(0, 16)
+  return `${pinterestPinId}:product:${hash}`
 }

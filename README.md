@@ -10,7 +10,8 @@ Wishlist personal y local que importa un tablero de Pinterest, descarga sus imá
 - Recorrido completo del tablero hasta que dejan de aparecer Pins nuevos.
 - Lectura automática de cada Pin para recuperar descripción, imagen y enlace de destino.
 - Resolución conservadora mediante JSON-LD, Open Graph y microdatos.
-- Búsqueda visual automática con Google Lens como fallback: las imágenes que no se resuelven por enlace o metadata se envían a Google para buscar coincidencias.
+- Google Lens mediante SerpApi como fuente principal de identificación visual, sin CAPTCHA del navegador.
+- Un Pin puede producir varios productos distintos; los resultados de varias tiendas se agrupan como ofertas del mismo producto.
 - SQLite, imágenes y sesión guardados únicamente en `.data/`.
 - Importaciones idempotentes y recuperables al volver a abrir el panel.
 
@@ -34,7 +35,7 @@ npm run dev
 
 Abre `http://localhost:3000/wishlist`, pulsa **Import from Pinterest** y pega la URL completa del tablero. Si todavía no existe una sesión local, el mismo botón abrirá Pinterest para iniciar sesión una vez y continuará la importación automáticamente al terminar.
 
-No se necesitan variables de entorno ni claves. Para guardar los datos en otra carpeta, configura `PINPINWISH_DATA_DIR` con una ruta local.
+La identificación visual requiere `SERPAPI_API_KEY` en `apps/web/.env.local`. SerpApi ofrece una cuota gratuita de 250 búsquedas mensuales. Para guardar los datos en otra carpeta, configura `PINPINWISH_DATA_DIR` con una ruta local.
 
 ## Datos privados
 
@@ -71,7 +72,7 @@ npm run build
 
 ## Limitaciones
 
-- Pinterest y Google Lens pueden cambiar su HTML o bloquear automatizaciones; esos fallos dejan el Pin como `unresolved` y no detienen el resto de la importación.
+- Si SerpApi o una tienda no devuelve evidencia suficiente, el producto queda como `unresolved` y no detiene el resto de la importación.
 - PinPinWish no evade CAPTCHA.
 - La automatización de páginas puede estar restringida por las condiciones de los servicios. Usa únicamente tableros e imágenes a los que tengas acceso legítimo.
 - La búsqueda visual es automática, pero puede no devolver una coincidencia fiable; esos Pins pasan a **Needs Review** sin inventar un producto.

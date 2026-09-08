@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS pinterest_pins (
   pin_url TEXT,
   pinned_at TEXT,
   is_deleted INTEGER NOT NULL DEFAULT 0,
+  is_archived INTEGER NOT NULL DEFAULT 0,
   last_seen_import_job_id TEXT REFERENCES import_jobs(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),

@@ -8,7 +8,10 @@ export function GET() {
     services: {
       sqlite: true,
       pinterestAutomation: true,
-      visualSearch: 'automatic',
+      visualSearch: {
+        provider: 'serpapi-google-lens',
+        configured: Boolean(process.env.SERPAPI_API_KEY?.trim()),
+      },
     },
     database: getDatabasePath().split(/[\\/]/).pop(),
   })

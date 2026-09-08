@@ -42,8 +42,8 @@ function normalizeString(s: string): string {
 }
 
 function isPossibleDuplicate(a: WishlistItem, b: WishlistItem): boolean {
-  // Skip removed items
-  if (a.status === 'removed' || b.status === 'removed') return false
+  // Skip removed or archived items
+  if (a.status === 'removed' || b.status === 'removed' || a.status === 'archived' || b.status === 'archived') return false
   // Unresolved Pins without offers/brand do not carry enough product evidence.
   if ((!a.product.brand && a.product.offers.length === 0) || (!b.product.brand && b.product.offers.length === 0)) return false
   // Skip already-identified as different (different categories)

@@ -30,7 +30,14 @@ export function removeItem(item: WishlistItem): WishlistItem {
 }
 
 /**
- * Restore a removed or purchased item back to wanted.
+ * Send an item to the trunk / archive (status = 'archived').
+ */
+export function archiveItem(item: WishlistItem): WishlistItem {
+  return transitionStatus(item, 'archived')
+}
+
+/**
+ * Restore an archived, removed, or purchased item back to wanted.
  */
 export function restoreItem(item: WishlistItem): WishlistItem {
   return transitionStatus(item, 'wanted')

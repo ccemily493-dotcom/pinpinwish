@@ -48,6 +48,7 @@ export interface ProductMatch {
   availability?: Availability
   sku?: string
   variant?: OfferVariantInfo
+  offers?: ParsedProductOffer[]
   confidence: number
   matchType: MatchType
   evidence?: {
@@ -72,4 +73,6 @@ export interface ProductResolver {
    * Attempt to resolve a Pinterest pin into a product match.
    */
   resolve(pin: PinterestPinInput, signal?: AbortSignal): Promise<ProductMatch>
+  /** Resolve every distinct product that can be supported by evidence in one Pin. */
+  resolveAll?(pin: PinterestPinInput, signal?: AbortSignal): Promise<ProductMatch[]>
 }

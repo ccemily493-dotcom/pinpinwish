@@ -12,10 +12,11 @@ export function applyFilters(
   let result = [...items]
 
   if (filters.status !== undefined) {
-    result = result.filter((item) => item.status === filters.status)
-  } else {
-    // Default: show only 'wanted' items unless a specific status is requested
-    // Note: the UI controls this explicitly, so here we pass all through
+    if (filters.status === 'archived') {
+      result = result.filter((item) => item.status === 'archived' || item.status === 'removed')
+    } else {
+      result = result.filter((item) => item.status === filters.status)
+    }
   }
 
   if (filters.search) {

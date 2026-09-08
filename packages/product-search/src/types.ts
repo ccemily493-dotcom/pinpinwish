@@ -26,6 +26,8 @@ export interface ProductSearchResult {
   currency?: Currency
   availability?: Availability
   relevanceScore: number
+  exactMatch?: boolean
+  sourcePosition?: number
 }
 
 export interface ProductSearchProvider {

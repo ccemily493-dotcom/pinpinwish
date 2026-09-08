@@ -4,12 +4,18 @@ import { useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useWishlistData, type ManualWishlistItem } from '@/hooks/useWishlistData'
 import { resolveDisplayImageUrl } from '@/lib/image-url'
+import { extractDroppedProductPayload } from '@/lib/dnd-parser'
 
 export default function NeedsReviewList() {
-  const { items, resolveItem } = useWishlistData()
+  const { items, resolveItem, dropResolveItem } = useWishlistData()
   const [editing, setEditing] = useState<string>()
   const [error, setError] = useState<string>()
-  const reviewItems = items.filter((item) => item.status !== 'removed' && !item.productId && item.product.offers.length === 0)
+  const [dragOverItemId, setDragOverItemId] = useState<string>()
+  const [resolvingItemId, setResolvingItemId] = useState<string>()
+
+  const reviewItems = items.filter(
+    (item) => item.status !== 'removed' && (item.resolutionStatus === 'needs_review' || !item.productId)
+  )
 
   async function submit(event: FormEvent<HTMLFormElement>, itemId: string, priority: ManualWishlistItem['priority']) {
     event.preventDefault()
@@ -31,6 +37,32 @@ export default function NeedsReviewList() {
       setEditing(undefined)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'No se pudo guardar.')
+    }
+  }
+
+  async function handleDropOnItem(itemId: string, e: React.DragEvent<HTMLElement>) {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragOverItemId(undefined)
+    setError(undefined)
+
+    const payload = extractDroppedProductPayload(e.dataTransfer)
+    if (!payload.url && !payload.imageUrl && !payload.title) {
+      setError('No se detectó un enlace o imagen válida.')
+      return
+    }
+
+    try {
+      setResolvingItemId(itemId)
+      await dropResolveItem(itemId, {
+        url: payload.url,
+        imageUrl: payload.imageUrl,
+        title: payload.title,
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al identificar producto arrastrado.')
+    } finally {
+      setResolvingItemId(undefined)
     }
   }
 
@@ -61,11 +93,52 @@ export default function NeedsReviewList() {
         <div className="space-y-4">
           {reviewItems.map((item) => {
             const displayImg = resolveDisplayImageUrl(item.product.imageUrl, item.product.localImagePath)
+            const isDraggingOverThis = dragOverItemId === item.id
+            const isResolvingThis = resolvingItemId === item.id
+
             return (
               <article
                 key={item.id}
-                className="grid gap-6 rounded-3xl border border-rose-100/80 bg-white p-5 shadow-2xs md:grid-cols-[180px_1fr]"
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (dragOverItemId !== item.id) setDragOverItemId(item.id)
+                }}
+                onDragEnter={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setDragOverItemId(item.id)
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (dragOverItemId === item.id) setDragOverItemId(undefined)
+                }}
+                onDrop={(e) => void handleDropOnItem(item.id, e)}
+                className={`relative grid gap-6 rounded-3xl border p-5 shadow-2xs transition-all duration-300 md:grid-cols-[180px_1fr] ${
+                  isDraggingOverThis
+                    ? 'border-[#831843] bg-[#fbc6e0]/20 shadow-xl ring-4 ring-[#831843]/15 scale-[1.01]'
+                    : 'border-rose-100/80 bg-white'
+                }`}
               >
+                {/* Drag over overlay */}
+                {isDraggingOverThis && (
+                  <div className="absolute inset-0 z-30 flex flex-col items-center justify-center rounded-3xl bg-[#831843]/85 p-4 text-center text-white backdrop-blur-xs">
+                    <span className="text-3xl animate-bounce">✨</span>
+                    <p className="mt-2 font-serif text-base font-bold">Soltar producto aquí para identificar</p>
+                    <p className="mt-0.5 text-xs text-rose-100">Se extraerán precio, marca, tienda y datos de la web</p>
+                  </div>
+                )}
+
+                {/* Resolving overlay */}
+                {isResolvingThis && (
+                  <div className="absolute inset-0 z-30 flex flex-col items-center justify-center rounded-3xl bg-white/95 p-4 text-center text-neutral-900 backdrop-blur-xs">
+                    <span className="h-6 w-6 animate-spin rounded-full border-2 border-[#831843] border-t-transparent" />
+                    <p className="mt-2 text-xs font-semibold text-[#831843]">Identificando producto desde la web…</p>
+                    <p className="mt-0.5 text-[10px] text-neutral-400">Extrayendo datos de la tienda</p>
+                  </div>
+                )}
+
                 <div className="aspect-square overflow-hidden rounded-2xl border border-neutral-100 bg-[#FAF7F2]">
                   {displayImg ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -75,12 +148,17 @@ export default function NeedsReviewList() {
                   )}
                 </div>
                 <div>
-                  <span className="text-[10px] font-bold tracking-widest text-[#831843] uppercase">
-                    Unidentified Pin
-                  </span>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold tracking-widest text-[#831843] uppercase">
+                      Unidentified Pin
+                    </span>
+                    <span className="hidden sm:inline-block rounded-full bg-rose-50 border border-rose-100 px-2.5 py-0.5 text-[10px] font-semibold text-[#831843]">
+                      💡 Arrastra un enlace o foto aquí
+                    </span>
+                  </div>
                   <h2 className="mt-1 font-serif text-2xl font-bold text-neutral-900">{item.product.name}</h2>
                   <p className="mt-1 text-xs text-neutral-500 leading-relaxed">
-                    No automatic high-confidence match was verified. You can identify the product details manually or mark it as not a product.
+                    No automatic high-confidence match was verified. You can drag and drop a product link from Zara, Amazon, etc. directly onto this card, identify it manually, or mark it as not a product.
                   </p>
 
                   {editing === item.id ? (

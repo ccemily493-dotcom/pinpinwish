@@ -15,7 +15,9 @@ export function getBestOffer(
   offers: ProductOffer[],
   currency: Currency
 ): ProductOffer | undefined {
-  const sameCurrencyOffers = offers.filter((offer) => offer.currency === currency)
+  const sameCurrencyOffers = offers.filter(
+    (offer) => offer.currency === currency && Number.isFinite(offer.currentPrice) && offer.currentPrice > 0
+  )
   if (sameCurrencyOffers.length === 0) return undefined
 
   const inStock = sameCurrencyOffers.filter((o) => o.availability === 'in_stock')

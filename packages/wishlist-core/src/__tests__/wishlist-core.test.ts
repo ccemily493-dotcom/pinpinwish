@@ -323,6 +323,19 @@ describe('getBestOffer', () => {
     expect(best?.availability).toBe('out_of_stock')
   })
 
+  it('ignores placeholder offers whose price is still unknown', () => {
+    const best = getBestOffer(
+      [
+        makeOffer({ id: 'unknown-price', currentPrice: 0, availability: 'unknown' }),
+        makeOffer({ id: 'priced', currentPrice: 75, availability: 'in_stock' }),
+      ],
+      'EUR'
+    )
+
+    expect(best?.id).toBe('priced')
+    expect(getBestOffer([makeOffer({ currentPrice: 0 })], 'EUR')).toBeUndefined()
+  })
+
   it('ignores numerically cheaper offers in another currency', () => {
     const offers = [
       makeOffer({ id: 'eur', currentPrice: 100, currency: 'EUR' }),

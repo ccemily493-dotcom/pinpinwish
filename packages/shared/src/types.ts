@@ -7,7 +7,7 @@ export type Currency = 'EUR' | 'USD' | 'GBP' | 'JPY' | 'CAD' | 'AUD'
 
 export type Priority = 'low' | 'medium' | 'high' | 'dream'
 
-export type WishlistItemStatus = 'wanted' | 'purchased' | 'removed'
+export type WishlistItemStatus = 'wanted' | 'purchased' | 'removed' | 'archived'
 
 export type Category =
   | 'clothes'

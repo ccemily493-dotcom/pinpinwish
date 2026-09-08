@@ -13,6 +13,7 @@
   "dependencies": {
     "@pinpinwish/pinterest-connector": "*",
     "@pinpinwish/price-tracker": "*",
+    "@pinpinwish/product-resolver": "*",
     "@pinpinwish/shared": "*",
     "@pinpinwish/wishlist-core": "*",
     "next": "^16.3.4",

@@ -8,18 +8,23 @@ import { formatPrice, formatDate } from '@pinpinwish/shared'
 import type { Currency, Priority, WishlistItemStatus } from '@pinpinwish/shared'
 import type { ProductOffer, PriceObservation } from '@pinpinwish/price-tracker'
 import { resolveDisplayImageUrl } from '@/lib/image-url'
+import EditWishlistItemModal from '@/components/wishlist/EditWishlistItemModal'
+import type { UpdateWishlistItemPayload } from '@/hooks/useWishlistData'
 
 interface Props {
   item: WishlistItem
   currency: Currency
   storageMode?: 'local' | 'cloud'
-  onUpdate?: (id: string, updates: { priority?: Priority; status?: WishlistItemStatus; desiredSize?: string; desiredColor?: string; notes?: string }) => Promise<void>
+  onUpdate?: (id: string, updates: UpdateWishlistItemPayload) => Promise<void>
 }
 
 export default function ProductDetailView({ item, currency, onUpdate }: Props) {
   const { product } = item
   const bestOffer = getBestOffer(product.offers, currency)
   const sortedOffers = [...product.offers].sort((a, b) => {
+    if (a.currentPrice <= 0 && b.currentPrice <= 0) return 0
+    if (a.currentPrice <= 0) return 1
+    if (b.currentPrice <= 0) return -1
     if (a.currency === b.currency) return a.currentPrice - b.currentPrice
     if (a.currency === currency) return -1
     if (b.currency === currency) return 1
@@ -32,6 +37,7 @@ export default function ProductDetailView({ item, currency, onUpdate }: Props) {
     : offersWithHistory[0]?.id ?? product.offers[0]?.id
 
   const [selectedOfferId, setSelectedOfferId] = useState<string | undefined>(defaultOfferId)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
 
   const selectedOffer = product.offers.find((o) => o.id === selectedOfferId) ?? bestOffer
   const selectedHistory = selectedOffer?.priceHistory
@@ -51,16 +57,26 @@ export default function ProductDetailView({ item, currency, onUpdate }: Props) {
       </div>
 
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-        {/* Back link */}
-        <Link
-          href="/wishlist"
-          className="mb-8 inline-flex items-center gap-2 text-xs font-semibold tracking-wider text-neutral-500 transition hover:text-[#831843] uppercase focus:outline-hidden"
-        >
-          <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-          Back to wishlist
-        </Link>
+        {/* Top actions: Back link & Edit button */}
+        <div className="mb-8 flex items-center justify-between">
+          <Link
+            href="/wishlist"
+            className="inline-flex items-center gap-2 text-xs font-semibold tracking-wider text-neutral-500 transition hover:text-[#831843] uppercase focus:outline-hidden"
+          >
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Back to wishlist
+          </Link>
+
+          <button
+            type="button"
+            onClick={() => setIsEditModalOpen(true)}
+            className="inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-4 py-2 text-xs font-semibold text-neutral-700 transition hover:border-[#831843] hover:text-[#831843] shadow-xs"
+          >
+            <span>✏️ Editar Producto</span>
+          </button>
+        </div>
 
         <div className="grid grid-cols-1 gap-10 md:grid-cols-2">
           {/* Main Image */}
@@ -220,7 +236,7 @@ export default function ProductDetailView({ item, currency, onUpdate }: Props) {
                           </div>
                         </td>
                         <td className="px-5 py-4 font-bold text-neutral-900">
-                          {formatPrice(offer.currentPrice, offer.currency)}
+                          {offer.currentPrice > 0 ? formatPrice(offer.currentPrice, offer.currency) : 'Price unavailable'}
                         </td>
                         <td className="px-5 py-4 text-neutral-500">
                           {offer.variant ? (
@@ -290,7 +306,7 @@ export default function ProductDetailView({ item, currency, onUpdate }: Props) {
                         : 'text-neutral-500 hover:text-neutral-900'
                     }`}
                   >
-                    {offer.store} ({formatPrice(offer.currentPrice, offer.currency)})
+                    {offer.store} ({offer.currentPrice > 0 ? formatPrice(offer.currentPrice, offer.currency) : 'No price'})
                   </button>
                 ))}
               </div>
@@ -303,7 +319,9 @@ export default function ProductDetailView({ item, currency, onUpdate }: Props) {
                 <div className="mb-6 flex items-center justify-between border-b border-rose-100/70 pb-4">
                   <div>
                     <h3 className="font-serif text-base font-bold text-neutral-900">{selectedOffer.store} Tracking Series</h3>
-                    <p className="text-xs text-neutral-400">Current: {formatPrice(selectedOffer.currentPrice, selectedOffer.currency)}</p>
+                    <p className="text-xs text-neutral-400">
+                      Current: {selectedOffer.currentPrice > 0 ? formatPrice(selectedOffer.currentPrice, selectedOffer.currency) : 'Price unavailable'}
+                    </p>
                   </div>
                   <span className="text-xs text-neutral-400">
                     {selectedHistory.length} {selectedHistory.length === 1 ? 'observation' : 'observations'}
@@ -324,6 +342,17 @@ export default function ProductDetailView({ item, currency, onUpdate }: Props) {
           </div>
         </section>
       </div>
+
+      <EditWishlistItemModal
+        item={item}
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        onSave={async (id, updates) => {
+          if (onUpdate) {
+            await onUpdate(id, updates)
+          }
+        }}
+      />
     </main>
   )
 }
