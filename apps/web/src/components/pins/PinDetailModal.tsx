@@ -18,7 +18,7 @@ interface Props {
   onDeleteItem: (id: string) => Promise<void>
   onArchivePin?: (pinId: string) => Promise<void>
   onRestorePin?: (pinId: string) => Promise<void>
-  onDeletePin?: (pinId: string) => Promise<boolean>
+  onDeletePin?: (pinId: string) => Promise<void>
 }
 
 export default function PinDetailModal({
@@ -165,8 +165,7 @@ export default function PinDetailModal({
                 <button
                   type="button"
                   onClick={async () => {
-                    const deleted = await onDeletePin(pin.id)
-                    if (deleted) onClose()
+                    await onDeletePin(pin.id)
                   }}
                   className="w-full rounded-full border border-red-200 bg-white py-2 text-xs font-medium text-red-600 transition hover:bg-red-50 hover:border-red-300 shadow-2xs"
                   title="Eliminar permanentemente este Pin y todos sus productos (requiere confirmación)"

@@ -36,6 +36,12 @@ const STATUS_TABS: { value: WishlistItemStatus | 'all'; label: string }[] = [
 
 const WISHLIST_CURRENCY = 'EUR' as const
 
+type PendingDeletion = {
+  kind: 'item' | 'pin'
+  id: string
+  label: string
+}
+
 export default function WishlistPage() {
   const {
     items,
@@ -63,6 +69,8 @@ export default function WishlistPage() {
   const [isDeduplicating, setIsDeduplicating] = useState(false)
   const [editingItem, setEditingItem] = useState<WishlistItem | null>(null)
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null)
+  const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState<Category | 'all'>('all')
   const [priority, setPriority] = useState<Priority | 'all'>('all')
@@ -169,22 +177,34 @@ export default function WishlistPage() {
     showToast('✨ ¡Prenda/producto añadido al Look!')
   }
 
-  async function handleDeleteItem(id: string) {
+  function requestDeleteItem(id: string) {
     const item = items.find((candidate) => candidate.id === id)
-    const label = item?.product.name || 'este producto'
-    if (!window.confirm(`¿Eliminar permanentemente “${label}”? Esta acción no se puede deshacer.`)) return false
-    await deleteItem(id)
-    showToast('🗑️ Producto eliminado permanentemente')
-    return true
+    setPendingDeletion({ kind: 'item', id, label: item?.product.name || 'este producto' })
   }
 
-  async function handleDeletePin(id: string) {
+  function requestDeletePin(id: string) {
     const pin = pins.find((candidate) => candidate.id === id)
-    const label = pin?.title || 'este Pin / Look'
-    if (!window.confirm(`¿Eliminar permanentemente “${label}” y todos sus productos? Esta acción no se puede deshacer.`)) return false
-    await deletePin(id)
-    showToast('🗑️ Look y productos eliminados permanentemente')
-    return true
+    setPendingDeletion({ kind: 'pin', id, label: pin?.title || 'este Pin / Look' })
+  }
+
+  async function confirmDeletion() {
+    if (!pendingDeletion || isDeleting) return
+    try {
+      setIsDeleting(true)
+      if (pendingDeletion.kind === 'pin') {
+        await deletePin(pendingDeletion.id)
+        setSelectedPinId(null)
+        showToast('🗑️ Look y productos eliminados permanentemente')
+      } else {
+        await deleteItem(pendingDeletion.id)
+        showToast('🗑️ Producto eliminado permanentemente')
+      }
+      setPendingDeletion(null)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'No se pudo eliminar el elemento')
+    } finally {
+      setIsDeleting(false)
+    }
   }
 
   return (
@@ -504,7 +524,7 @@ export default function WishlistPage() {
                       showToast('↺ Look restaurado a la wishlist activa')
                     }}
                     onDelete={async (pinId) => {
-                      await handleDeletePin(pinId)
+                      requestDeletePin(pinId)
                     }}
                   />
                 ))}
@@ -541,7 +561,7 @@ export default function WishlistPage() {
                     currency={WISHLIST_CURRENCY}
                     onUpdate={(id, updates) => void updateItem(id, updates)}
                     onDelete={async (id) => {
-                      await handleDeleteItem(id)
+                      requestDeleteItem(id)
                     }}
                     onEdit={(itm) => setEditingItem(itm)}
                     onDropResolve={handleDropOnCard}
@@ -582,7 +602,7 @@ export default function WishlistPage() {
           await updateItem(id, updates)
         }}
         onDeleteItem={async (id) => {
-          await handleDeleteItem(id)
+          requestDeleteItem(id)
         }}
         onArchivePin={async (id) => {
           await archivePin(id)
@@ -592,8 +612,50 @@ export default function WishlistPage() {
           await restorePin(id)
           showToast('↺ Look restaurado a la wishlist activa')
         }}
-        onDeletePin={handleDeletePin}
+        onDeletePin={async (id) => {
+          requestDeletePin(id)
+        }}
       />
+
+      {pendingDeletion && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-confirmation-title"
+        >
+          <div className="w-full max-w-md rounded-3xl border border-red-100 bg-white p-6 shadow-2xl">
+            <span className="text-2xl" aria-hidden="true">🗑️</span>
+            <h2 id="delete-confirmation-title" className="mt-3 font-serif text-2xl font-bold text-neutral-900">
+              ¿Eliminar permanentemente?
+            </h2>
+            <p className="mt-2 text-sm leading-relaxed text-neutral-600">
+              {pendingDeletion.kind === 'pin'
+                ? `Se eliminará “${pendingDeletion.label}” y todos sus productos.`
+                : `Se eliminará “${pendingDeletion.label}” de tu wishlist.`}{' '}
+              Esta acción no se puede deshacer.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingDeletion(null)}
+                disabled={isDeleting}
+                className="rounded-full border border-neutral-200 px-5 py-2.5 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-100 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeletion()}
+                disabled={isDeleting}
+                className="rounded-full bg-red-600 px-5 py-2.5 text-xs font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
+              >
+                {isDeleting ? 'Eliminando…' : 'Eliminar permanentemente'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
